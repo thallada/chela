@@ -58,6 +58,7 @@ pub struct Sink<'arena> {
     quirks_mode: QuirksMode,
 }
 
+#[derive(Debug)]
 pub struct Node<'arena> {
     pub parent: Link<'arena>,
     pub next_sibling: Link<'arena>,
@@ -67,6 +68,7 @@ pub struct Node<'arena> {
     pub data: NodeData<'arena>,
 }
 
+#[derive(Debug)]
 pub enum NodeData<'arena> {
     Document,
     Doctype {

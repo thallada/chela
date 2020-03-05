@@ -1,3 +1,4 @@
+#![warn(clippy::all)]
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
@@ -5,6 +6,7 @@ extern crate html5ever;
 #[macro_use]
 extern crate maplit;
 extern crate typed_arena;
+extern crate cssparser;
 
 use std::collections::HashSet;
 use std::default::Default;
@@ -17,7 +19,9 @@ use url::{ParseError, Url};
 
 mod arena_dom;
 mod config;
+mod css_parser;
 
+use css_parser::{parse_css_style_attribute, parse_css_stylesheet};
 use arena_dom::{create_element, html5ever_parse_slice_into_arena, Arena, NodeData, Ref};
 use config::permissive::{ADD_ATTRIBUTES, ALL_ATTRIBUTES, ATTRIBUTES, ELEMENTS, PROTOCOLS};
 
@@ -66,9 +70,22 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
     match node.data {
         NodeData::Document
         | NodeData::Doctype { .. }
-        | NodeData::Text { .. }
         | NodeData::Comment { .. }
         | NodeData::ProcessingInstruction { .. } => {}
+        NodeData::Text { ref contents } => {
+            dbg!(contents);
+            // TODO: seems rather expensive to lookup the parent on every Text node. Better
+            // solution would be to pass some sort of context from the parent that marks that this
+            // Text node is inside a <style>.
+            if let Some(parent) = node.parent.get() {
+                if let NodeData::Element { ref name, .. } = parent.data {
+                    if name.local == local_name!("style") {
+                        let rules = parse_css_stylesheet(&contents.borrow());
+                        dbg!(&rules);
+                    }
+                }
+            }
+        }
         NodeData::Element {
             ref attrs,
             ref name,
@@ -80,7 +97,6 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
             if let Some(element_attrs) = ATTRIBUTES.get(&name.local) {
                 allowed_attrs = allowed_attrs
                     .union(element_attrs)
-                    .into_iter()
                     .cloned()
                     .collect();
             }
@@ -89,6 +105,12 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
                 if !allowed_attrs.contains(&attrs[i].name.local) {
                     attrs.remove(i);
                 } else {
+                    if attrs[i].name.local == local_name!("style") {
+                        let css_str = &attrs[i].value;
+                        dbg!(&css_str);
+                        let declarations = parse_css_style_attribute(css_str);
+                        dbg!(&declarations);
+                    }
                     i += 1;
                 }
             }

@@ -1,6 +1,7 @@
 use html5ever::LocalName;
 
 use std::collections::{HashMap, HashSet};
+use std::iter::FromIterator;
 
 use super::basic::{
     ADD_ATTRIBUTES as BASIC_ADD_ATTRIBUTES, ALL_ATTRIBUTES as BASIC_ALL_ATTRIBUTES,
@@ -8,12 +9,7 @@ use super::basic::{
     ELEMENTS as BASIC_ELEMENTS,
 };
 
-#[macro_use]
-mod css_property {
-    include!(concat!(env!("OUT_DIR"), "/css_property.rs"));
-}
-
-use css_property::{CssProperty};
+use crate::css_property::CssProperty;
 
 lazy_static! {
     pub static ref ELEMENTS: HashSet<LocalName> = BASIC_ELEMENTS
@@ -204,7 +200,7 @@ lazy_static! {
             local_name!("cite") => hashset!{"http", "https"},
         },
     };
-    pub static ref CSS_PROPERTIES: Vec<CssProperty> = vec![
+    pub static ref CSS_PROPERTIES: HashSet<CssProperty> = vec![
         css_property!("-moz-appearance"),
         css_property!("-moz-background-inline-policy"),
         css_property!("-moz-box-sizing"),
@@ -848,5 +844,5 @@ lazy_static! {
         css_property!("wrap-through"),
         css_property!("writing-mode"),
         css_property!("z-index"),
-    ];
+    ].into_iter().collect();
 }

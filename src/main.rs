@@ -5,9 +5,9 @@ extern crate lazy_static;
 extern crate html5ever;
 #[macro_use]
 extern crate maplit;
-extern crate typed_arena;
 extern crate cssparser;
 extern crate string_cache;
+extern crate typed_arena;
 
 use std::collections::HashSet;
 use std::default::Default;
@@ -18,13 +18,20 @@ use html5ever::{serialize, Attribute, LocalName, QualName};
 
 use url::{ParseError, Url};
 
+#[macro_use]
+mod css_property {
+    include!(concat!(env!("OUT_DIR"), "/css_property.rs"));
+}
+
 mod arena_dom;
 mod config;
 mod css_parser;
 
-use css_parser::{parse_css_style_attribute, parse_css_stylesheet};
 use arena_dom::{create_element, html5ever_parse_slice_into_arena, Arena, NodeData, Ref};
 use config::permissive::{ADD_ATTRIBUTES, ALL_ATTRIBUTES, ATTRIBUTES, ELEMENTS, PROTOCOLS};
+use config::relaxed::CSS_PROPERTIES;
+use css_parser::{parse_css_style_attribute, parse_css_stylesheet};
+use css_property::CssProperty;
 
 fn main() {
     let mut bytes = Vec::new();
@@ -63,8 +70,8 @@ fn sanitize<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
 // TODO: add map of tags to attributes, remove any on tag not in the mapped value DONE
 // TODO: add whitelist of url schemes, parse urls and remove any not in it DONE
 // TODO: strip comments DONE
-// TODO: parse style tags and attributes
-// TODO: add whitelist of CSS properties, remove any not in it
+// TODO: parse style tags and attributes DONE
+// TODO: add whitelist of CSS properties, remove any not in it DONE
 // TODO: scope selectors in rich formatter
 // TODO: add class attributes to elements in rich formatter
 fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
@@ -82,6 +89,25 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
                     if name.local == local_name!("style") {
                         let rules = parse_css_stylesheet(&contents.borrow());
                         dbg!(&rules);
+                        let mut sanitized_css = String::new();
+                        for rule in rules {
+                            sanitized_css += &rule.selectors.trim();
+                            sanitized_css += " {\n";
+                            for declaration in rule.declarations.into_iter() {
+                                let declaration_string = &declaration.to_string();
+                                if CSS_PROPERTIES
+                                    .contains(&CssProperty::from(declaration.property))
+                                {
+                                    sanitized_css += "  ";
+                                    sanitized_css += declaration_string;
+                                    sanitized_css += " ";
+                                }
+                            }
+                            sanitized_css += "\n}";
+                        }
+                        let sanitized_css = sanitized_css.trim();
+                        dbg!(&sanitized_css);
+                        contents.replace(StrTendril::from(sanitized_css));
                     }
                 }
             }
@@ -95,10 +121,7 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
 
             let mut allowed_attrs: HashSet<LocalName> = ALL_ATTRIBUTES.clone();
             if let Some(element_attrs) = ATTRIBUTES.get(&name.local) {
-                allowed_attrs = allowed_attrs
-                    .union(element_attrs)
-                    .cloned()
-                    .collect();
+                allowed_attrs = allowed_attrs.union(element_attrs).cloned().collect();
             }
             let mut i = 0;
             while i != attrs.len() {
@@ -110,14 +133,16 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
                         let declarations = parse_css_style_attribute(css_str);
                         dbg!(&declarations);
                         let mut sanitized_css = String::new();
-                        for (index, declaration) in declarations.iter().enumerate() {
-                            if declaration.property == "color" {
-                                sanitized_css += &declaration.to_string();
-                                if index != declarations.len() - 1 {
-                                    sanitized_css += " ";
-                                }
+                        for declaration in declarations.into_iter() {
+                            let declaration_string = &declaration.to_string();
+                            if CSS_PROPERTIES
+                                .contains(&CssProperty::from(declaration.property))
+                            {
+                                sanitized_css += declaration_string;
+                                sanitized_css += " ";
                             }
                         }
+                        let sanitized_css = sanitized_css.trim();
                         dbg!(&sanitized_css);
                         attrs[i].value = StrTendril::from(sanitized_css);
                     }

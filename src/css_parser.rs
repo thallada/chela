@@ -2,8 +2,12 @@ use cssparser::{
     AtRuleParser, CowRcStr, DeclarationListParser, DeclarationParser, ParseError, Parser,
     ParserInput, QualifiedRuleParser, RuleListParser, SourceLocation,
 };
+use std::fmt;
+use std::convert::Into;
 use std::error::Error;
 
+// TODO: try to use CowRcStr instead of Strings in these structs.
+// I tried to do it earlier but I ended up in lifetime hell in parse_block().
 #[derive(Debug)]
 pub struct CssRule {
     pub selectors: String,
@@ -39,10 +43,7 @@ impl<'i> QualifiedRuleParser<'i> for CssParser {
         &mut self,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self::Prelude, CssParseError<'i>> {
-        let location = input.current_source_location();
-        dbg!(&location);
         let position = input.position();
-        dbg!(&position);
         while input.next().is_ok() {}
         Ok(input.slice_from(position).to_string())
     }
@@ -53,7 +54,6 @@ impl<'i> QualifiedRuleParser<'i> for CssParser {
         _location: SourceLocation,
         input: &mut Parser<'i, 't>,
     ) -> Result<CssRule, CssParseError<'i>> {
-        dbg!(&selectors);
         Ok(CssRule {
             selectors,
             declarations: parse_declarations(input).unwrap(),
@@ -100,9 +100,18 @@ impl<'i> DeclarationParser<'i> for CssDeclarationParser {
     fn parse_value<'t>(
         &mut self,
         name: CowRcStr<'i>,
-        mut input: &mut Parser<'i, 't>,
+        input: &mut Parser<'i, 't>,
     ) -> Result<Self::Declaration, ParseError<'i, CssError>> {
-        Ok(vec![])
+        dbg!(&name);
+        let start = input.position();
+        input.next()?;
+        let value = input.slice_from(start);
+        dbg!(&value);
+
+        Ok(vec![CssDeclaration {
+            property: name.to_string(),
+            value: value.trim().to_string(),
+        }])
     }
 }
 
@@ -133,4 +142,16 @@ pub fn parse_declarations<'i>(
     }
 
     Ok(declarations)
+}
+
+impl fmt::Display for CssDeclaration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {};", self.property, self.value)
+    }
+}
+
+impl Into<String> for CssDeclaration {
+    fn into(self) -> String {
+        format!("{}: {};", self.property, self.value)
+    }
 }

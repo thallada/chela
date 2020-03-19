@@ -69,4 +69,5 @@ lazy_static! {
             local_name!("cite") => hashset!{"http", "https"},
         },
     };
+    pub static ref CSS_PROPERTIES: Vec<String> = vec![];
 }

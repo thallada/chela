@@ -7,6 +7,7 @@ extern crate html5ever;
 extern crate maplit;
 extern crate typed_arena;
 extern crate cssparser;
+extern crate string_cache;
 
 use std::collections::HashSet;
 use std::default::Default;
@@ -73,7 +74,6 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
         | NodeData::Comment { .. }
         | NodeData::ProcessingInstruction { .. } => {}
         NodeData::Text { ref contents } => {
-            dbg!(contents);
             // TODO: seems rather expensive to lookup the parent on every Text node. Better
             // solution would be to pass some sort of context from the parent that marks that this
             // Text node is inside a <style>.
@@ -107,9 +107,19 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
                 } else {
                     if attrs[i].name.local == local_name!("style") {
                         let css_str = &attrs[i].value;
-                        dbg!(&css_str);
                         let declarations = parse_css_style_attribute(css_str);
                         dbg!(&declarations);
+                        let mut sanitized_css = String::new();
+                        for (index, declaration) in declarations.iter().enumerate() {
+                            if declaration.property == "color" {
+                                sanitized_css += &declaration.to_string();
+                                if index != declarations.len() - 1 {
+                                    sanitized_css += " ";
+                                }
+                            }
+                        }
+                        dbg!(&sanitized_css);
+                        attrs[i].value = StrTendril::from(sanitized_css);
                     }
                     i += 1;
                 }
@@ -168,7 +178,7 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
     }
 }
 
-fn maybe_unwrap_node<'arena>(node: Ref<'arena>) -> Option<Option<Ref<'arena>>> {
+fn maybe_unwrap_node(node: Ref) -> Option<Option<Ref>> {
     match node.data {
         NodeData::Document
         | NodeData::Doctype { .. }

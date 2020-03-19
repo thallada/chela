@@ -5,6 +5,7 @@ extern crate lazy_static;
 extern crate html5ever;
 #[macro_use]
 extern crate maplit;
+#[macro_use]
 extern crate cssparser;
 extern crate string_cache;
 extern crate typed_arena;
@@ -30,7 +31,7 @@ mod css_parser;
 use arena_dom::{create_element, html5ever_parse_slice_into_arena, Arena, NodeData, Ref};
 use config::permissive::{ADD_ATTRIBUTES, ALL_ATTRIBUTES, ATTRIBUTES, ELEMENTS, PROTOCOLS};
 use config::relaxed::CSS_PROPERTIES;
-use css_parser::{parse_css_style_attribute, parse_css_stylesheet};
+use css_parser::{CssRule, parse_css_style_attribute, parse_css_stylesheet};
 use css_property::CssProperty;
 
 fn main() {
@@ -91,19 +92,34 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
                         dbg!(&rules);
                         let mut sanitized_css = String::new();
                         for rule in rules {
-                            sanitized_css += &rule.selectors.trim();
-                            sanitized_css += " {\n";
-                            for declaration in rule.declarations.into_iter() {
-                                let declaration_string = &declaration.to_string();
-                                if CSS_PROPERTIES
-                                    .contains(&CssProperty::from(declaration.property))
-                                {
-                                    sanitized_css += "  ";
-                                    sanitized_css += declaration_string;
-                                    sanitized_css += " ";
+                            match rule {
+                                CssRule::StyleRule(style_rule) => {
+                                    sanitized_css += &style_rule.selectors.trim();
+                                    sanitized_css += " {\n";
+                                    for declaration in style_rule.declarations.into_iter() {
+                                        let declaration_string = &declaration.to_string();
+                                        if CSS_PROPERTIES
+                                            .contains(&CssProperty::from(declaration.property))
+                                        {
+                                            sanitized_css += "  ";
+                                            sanitized_css += declaration_string;
+                                            sanitized_css += " ";
+                                        }
+                                    }
+                                    sanitized_css += "\n}";
+                                },
+                                CssRule::AtRule(at_rule) => {
+                                    dbg!(&at_rule);
+                                    sanitized_css += &format!("@{} ", at_rule.name);
+                                    sanitized_css += &at_rule.prelude.trim();
+                                    if let Some(block) = at_rule.block {
+                                        sanitized_css += " {\n";
+                                        sanitized_css += &block.trim();
+                                        sanitized_css += "\n}";
+                                    }
                                 }
                             }
-                            sanitized_css += "\n}";
+                            sanitized_css += "\n";
                         }
                         let sanitized_css = sanitized_css.trim();
                         dbg!(&sanitized_css);

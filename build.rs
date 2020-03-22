@@ -651,5 +651,52 @@ fn main() {
             "z-index",
         ])
         .write_to_file(&Path::new(&env::var("OUT_DIR").unwrap()).join("css_property.rs"))
+        .unwrap();
+
+    string_cache_codegen::AtomType::new("css_at_rule::CssAtRule", "css_at_rule!")
+        .atoms(vec![
+            "top-left-corner",
+            "top-left",
+            "top-center",
+            "top-right",
+            "top-right-corner",
+            "bottom-left-corner",
+            "bottom-left",
+            "bottom-center",
+            "bottom-right",
+            "bottom-right-corner",
+            "left-top",
+            "left-middle",
+            "left-bottom",
+            "right-top",
+            "right-middle",
+            "right-bottom",
+            "-moz-keyframes",
+            "-o-keyframes",
+            "-webkit-keyframes",
+            "apply",
+            "annotation",
+            "character-variant",
+            "charset",
+            "counter-style",
+            "custom-media",
+            "custom-selector",
+            "document",
+            "font-face",
+            "font-feature-values",
+            "import",
+            "keyframes",
+            "media",
+            "namespace",
+            "nest",
+            "ornaments",
+            "page",
+            "styleset",
+            "stylistic",
+            "supports",
+            "swash",
+            "viewport",
+        ])
+        .write_to_file(&Path::new(&env::var("OUT_DIR").unwrap()).join("css_at_rule.rs"))
         .unwrap()
 }

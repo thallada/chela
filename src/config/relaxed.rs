@@ -10,6 +10,7 @@ use super::basic::{
 };
 
 use crate::css_property::CssProperty;
+use crate::css_at_rule::CssAtRule;
 
 lazy_static! {
     pub static ref ELEMENTS: HashSet<LocalName> = BASIC_ELEMENTS
@@ -844,5 +845,32 @@ lazy_static! {
         css_property!("wrap-through"),
         css_property!("writing-mode"),
         css_property!("z-index"),
+    ].into_iter().collect();
+    pub static ref CSS_AT_RULES: HashSet<CssAtRule> = vec![
+        css_at_rule!("bottom-center"),
+        css_at_rule!("bottom-left"),
+        css_at_rule!("bottom-left-corner"),
+        css_at_rule!("bottom-right"),
+        css_at_rule!("bottom-right-corner"),
+        css_at_rule!("font-face"),
+        css_at_rule!("left-bottom"),
+        css_at_rule!("left-middle"),
+        css_at_rule!("left-top"),
+        css_at_rule!("page"),
+        css_at_rule!("right-bottom"),
+        css_at_rule!("right-middle"),
+        css_at_rule!("right-top"),
+        css_at_rule!("top-center"),
+        css_at_rule!("top-left"),
+        css_at_rule!("top-left-corner"),
+        css_at_rule!("top-right"),
+        css_at_rule!("top-right-corner"),
+        css_at_rule!("-moz-keyframes"),
+        css_at_rule!("-o-keyframes"),
+        css_at_rule!("-webkit-keyframes"),
+        css_at_rule!("document"),
+        css_at_rule!("keyframes"),
+        css_at_rule!("media"),
+        css_at_rule!("supports"),
     ].into_iter().collect();
 }

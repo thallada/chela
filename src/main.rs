@@ -23,6 +23,10 @@ use url::{ParseError, Url};
 mod css_property {
     include!(concat!(env!("OUT_DIR"), "/css_property.rs"));
 }
+#[macro_use]
+mod css_at_rule {
+    include!(concat!(env!("OUT_DIR"), "/css_at_rule.rs"));
+}
 
 mod arena_dom;
 mod config;
@@ -30,9 +34,10 @@ mod css_parser;
 
 use arena_dom::{create_element, html5ever_parse_slice_into_arena, Arena, NodeData, Ref};
 use config::permissive::{ADD_ATTRIBUTES, ALL_ATTRIBUTES, ATTRIBUTES, ELEMENTS, PROTOCOLS};
-use config::relaxed::CSS_PROPERTIES;
+use config::relaxed::{CSS_PROPERTIES, CSS_AT_RULES};
 use css_parser::{CssRule, parse_css_style_attribute, parse_css_stylesheet};
 use css_property::CssProperty;
+use css_at_rule::CssAtRule;
 
 fn main() {
     let mut bytes = Vec::new();
@@ -65,6 +70,45 @@ fn sanitize<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
     }
 }
 
+fn css_rules_to_string(rules: Vec<CssRule>) -> String {
+    let mut sanitized_css = String::new();
+    for rule in rules {
+        match rule {
+            CssRule::StyleRule(style_rule) => {
+                sanitized_css += &style_rule.selectors.trim();
+                sanitized_css += " {\n";
+                for declaration in style_rule.declarations.into_iter() {
+                    let declaration_string = &declaration.to_string();
+                    if CSS_PROPERTIES
+                        .contains(&CssProperty::from(declaration.property))
+                    {
+                        sanitized_css += "  ";
+                        sanitized_css += declaration_string;
+                        sanitized_css += " ";
+                    }
+                }
+                sanitized_css += "\n}";
+            },
+            CssRule::AtRule(at_rule) => {
+                dbg!(&at_rule);
+                if CSS_AT_RULES
+                    .contains(&CssAtRule::from(at_rule.name.clone()))
+                {
+                    sanitized_css += &format!("@{} ", &at_rule.name);
+                    sanitized_css += &at_rule.prelude.trim();
+                    if let Some(block) = at_rule.block {
+                        sanitized_css += " {\n";
+                        sanitized_css += &css_rules_to_string(block);
+                        sanitized_css += "\n}";
+                    }
+                }
+            }
+        }
+        sanitized_css += "\n";
+    }
+    sanitized_css.trim().to_string()
+}
+
 // TODO: make separate rich and plain transformers
 // TODO: add whitelist of tags, remove any not in it DONE
 // TODO: add whitelist of attributes, remove any not in it DONE
@@ -90,38 +134,7 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
                     if name.local == local_name!("style") {
                         let rules = parse_css_stylesheet(&contents.borrow());
                         dbg!(&rules);
-                        let mut sanitized_css = String::new();
-                        for rule in rules {
-                            match rule {
-                                CssRule::StyleRule(style_rule) => {
-                                    sanitized_css += &style_rule.selectors.trim();
-                                    sanitized_css += " {\n";
-                                    for declaration in style_rule.declarations.into_iter() {
-                                        let declaration_string = &declaration.to_string();
-                                        if CSS_PROPERTIES
-                                            .contains(&CssProperty::from(declaration.property))
-                                        {
-                                            sanitized_css += "  ";
-                                            sanitized_css += declaration_string;
-                                            sanitized_css += " ";
-                                        }
-                                    }
-                                    sanitized_css += "\n}";
-                                },
-                                CssRule::AtRule(at_rule) => {
-                                    dbg!(&at_rule);
-                                    sanitized_css += &format!("@{} ", at_rule.name);
-                                    sanitized_css += &at_rule.prelude.trim();
-                                    if let Some(block) = at_rule.block {
-                                        sanitized_css += " {\n";
-                                        sanitized_css += &block.trim();
-                                        sanitized_css += "\n}";
-                                    }
-                                }
-                            }
-                            sanitized_css += "\n";
-                        }
-                        let sanitized_css = sanitized_css.trim();
+                        let sanitized_css = css_rules_to_string(rules);
                         dbg!(&sanitized_css);
                         contents.replace(StrTendril::from(sanitized_css));
                     }

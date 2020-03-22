@@ -25,7 +25,7 @@ pub struct CssAtRule {
     // TODO: put name into the string cache
     pub name: String,
     pub prelude: String,
-    pub block: Option<String>,
+    pub block: Option<Vec<CssRule>>,
 }
 
 #[derive(Debug)]
@@ -81,12 +81,24 @@ impl<'i> AtRuleParser<'i> for CssParser {
         _location: SourceLocation,
         input: &mut Parser<'i, 't>
     ) -> Result<Self::AtRule, CssParseError<'i>> {
-        let position = input.position();
-        while input.next().is_ok() {}
+        let rule_list_parser = RuleListParser::new_for_stylesheet(input, CssParser);
+        let mut rules = Vec::new();
+
+        for result in rule_list_parser {
+            let rule = match result {
+                Ok(r) => r,
+                Err((error, string)) => {
+                    eprintln!("Rule dropped: {:?}, {:?}", error, string);
+                    continue;
+                }
+            };
+            rules.push(rule);
+        }
+
         Ok(CssRule::AtRule(CssAtRule {
             name: prelude.name,
             prelude: prelude.prelude,
-            block: Some(input.slice_from(position).to_string()),
+            block: Some(rules),
         }))
     }
 

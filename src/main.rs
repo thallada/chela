@@ -31,6 +31,7 @@ mod css_at_rule {
 mod arena_dom;
 mod config;
 mod css_parser;
+mod traverser;
 
 use arena_dom::{create_element, html5ever_parse_slice_into_arena, Arena, NodeData, Ref};
 use config::permissive::{ADD_ATTRIBUTES, ALL_ATTRIBUTES, ATTRIBUTES, ELEMENTS, PROTOCOLS};

@@ -35,40 +35,17 @@ mod traverser;
 
 use arena_dom::{create_element, html5ever_parse_slice_into_arena, Arena, NodeData, Ref};
 use config::permissive::{ADD_ATTRIBUTES, ALL_ATTRIBUTES, ATTRIBUTES, ELEMENTS, PROTOCOLS};
-use config::relaxed::{CSS_PROPERTIES, CSS_AT_RULES};
-use css_parser::{CssRule, parse_css_style_attribute, parse_css_stylesheet};
-use css_property::CssProperty;
+use config::relaxed::{CSS_AT_RULES, CSS_PROPERTIES};
 use css_at_rule::CssAtRule;
+use css_parser::{parse_css_style_attribute, parse_css_stylesheet, CssRule};
+use css_property::CssProperty;
+use traverser::Traverser;
 
 fn main() {
-    let mut bytes = Vec::new();
-    io::stdin().read_to_end(&mut bytes).unwrap();
-    let arena = typed_arena::Arena::new();
-    let doc = html5ever_parse_slice_into_arena(&bytes, &arena);
-    sanitize(doc, &arena);
-    serialize(&mut io::stdout(), doc, Default::default())
-        .ok()
-        .expect("serialization failed")
-}
-
-fn sanitize<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
-    if let Some(unwrapped) = maybe_unwrap_node(&node) {
-        if let Some(unwrapped_node) = unwrapped {
-            return sanitize(unwrapped_node, arena);
-        } else {
-            return;
-        }
-    }
-
-    transform_node(&node, arena);
-
-    if let Some(child) = node.first_child.get() {
-        sanitize(child, arena);
-    }
-
-    if let Some(sibling) = node.next_sibling.get() {
-        sanitize(sibling, arena);
-    }
+    let traverser = Traverser::new(&should_unwrap_node, vec![Box::new(&transform_node)]);
+    let root = traverser.parse(&mut io::stdin()).unwrap();
+    traverser.traverse(root);
+    serialize(&mut io::stdout(), root, Default::default()).expect("serialization failed")
 }
 
 fn css_rules_to_string(rules: Vec<CssRule>) -> String {
@@ -80,21 +57,17 @@ fn css_rules_to_string(rules: Vec<CssRule>) -> String {
                 sanitized_css += " {\n";
                 for declaration in style_rule.declarations.into_iter() {
                     let declaration_string = &declaration.to_string();
-                    if CSS_PROPERTIES
-                        .contains(&CssProperty::from(declaration.property))
-                    {
+                    if CSS_PROPERTIES.contains(&CssProperty::from(declaration.property)) {
                         sanitized_css += "  ";
                         sanitized_css += declaration_string;
                         sanitized_css += " ";
                     }
                 }
                 sanitized_css += "\n}";
-            },
+            }
             CssRule::AtRule(at_rule) => {
                 dbg!(&at_rule);
-                if CSS_AT_RULES
-                    .contains(&CssAtRule::from(at_rule.name.clone()))
-                {
+                if CSS_AT_RULES.contains(&CssAtRule::from(at_rule.name.clone())) {
                     sanitized_css += &format!("@{} ", &at_rule.name);
                     sanitized_css += &at_rule.prelude.trim();
                     if let Some(block) = at_rule.block {
@@ -111,21 +84,22 @@ fn css_rules_to_string(rules: Vec<CssRule>) -> String {
 }
 
 // TODO: make separate rich and plain transformers
-// TODO: add whitelist of tags, remove any not in it DONE
-// TODO: add whitelist of attributes, remove any not in it DONE
-// TODO: add map of tags to attributes, remove any on tag not in the mapped value DONE
-// TODO: add whitelist of url schemes, parse urls and remove any not in it DONE
-// TODO: strip comments DONE
-// TODO: parse style tags and attributes DONE
-// TODO: add whitelist of CSS properties, remove any not in it DONE
+// DONE: add whitelist of tags, remove any not in it
+// DONE: add whitelist of attributes, remove any not in it
+// DONE: add map of tags to attributes, remove any on tag not in the mapped value
+// DONE: add whitelist of url schemes, parse urls and remove any not in it
+// DONE: strip comments
+// DONE: parse style tags and attributes
+// DONE: add whitelist of CSS properties, remove any not in it
 // TODO: scope selectors in rich formatter
 // TODO: add class attributes to elements in rich formatter
-fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
+// TODO: separate this out into multiple separate transformers
+fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) -> bool {
     match node.data {
         NodeData::Document
         | NodeData::Doctype { .. }
         | NodeData::Comment { .. }
-        | NodeData::ProcessingInstruction { .. } => {}
+        | NodeData::ProcessingInstruction { .. } => false,
         NodeData::Text { ref contents } => {
             // TODO: seems rather expensive to lookup the parent on every Text node. Better
             // solution would be to pass some sort of context from the parent that marks that this
@@ -138,9 +112,11 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
                         let sanitized_css = css_rules_to_string(rules);
                         dbg!(&sanitized_css);
                         contents.replace(StrTendril::from(sanitized_css));
+                        return true;
                     }
                 }
             }
+            false
         }
         NodeData::Element {
             ref attrs,
@@ -165,9 +141,7 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
                         let mut sanitized_css = String::new();
                         for declaration in declarations.into_iter() {
                             let declaration_string = &declaration.to_string();
-                            if CSS_PROPERTIES
-                                .contains(&CssProperty::from(declaration.property))
-                            {
+                            if CSS_PROPERTIES.contains(&CssProperty::from(declaration.property)) {
                                 sanitized_css += declaration_string;
                                 sanitized_css += " ";
                             }
@@ -229,23 +203,18 @@ fn transform_node<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
                 }
                 _ => {}
             }
+            false
         }
     }
 }
 
-fn maybe_unwrap_node(node: Ref) -> Option<Option<Ref>> {
+fn should_unwrap_node(node: Ref) -> bool {
     match node.data {
         NodeData::Document
         | NodeData::Doctype { .. }
         | NodeData::Text { .. }
-        | NodeData::ProcessingInstruction { .. } => None,
-        NodeData::Comment { .. } => Some(node.unwrap()),
-        NodeData::Element { ref name, .. } => {
-            if !ELEMENTS.contains(&name.local) {
-                Some(node.unwrap())
-            } else {
-                None
-            }
-        }
+        | NodeData::ProcessingInstruction { .. } => false,
+        NodeData::Comment { .. } => true,
+        NodeData::Element { ref name, .. } => !ELEMENTS.contains(&name.local),
     }
 }

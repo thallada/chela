@@ -17,6 +17,7 @@ use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::default::Default;
+use std::fmt;
 use std::io;
 use std::ptr;
 
@@ -167,7 +168,7 @@ impl<'arena> Node<'arena> {
                 Some(next_child) => {
                     next_child.parent.set(parent);
                     child = next_child.next_sibling.get();
-                },
+                }
                 None => break,
             }
         }
@@ -230,6 +231,32 @@ impl<'arena> Node<'arena> {
         }
         self.next_sibling.set(Some(new_sibling));
     }
+}
+
+impl<'arena> fmt::Display for Node<'arena> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_node(self, 0, f)
+    }
+}
+
+fn write_node<'arena>(
+    node: &Node<'arena>,
+    indent: usize,
+    f: &mut fmt::Formatter<'_>,
+) -> fmt::Result {
+    let indent_str = "  ".repeat(indent);
+    writeln!(f, "{}Node {{", &indent_str)?;
+    writeln!(f, "{}  data: {:?}", &indent_str, node.data)?;
+    let mut child = node.first_child.get();
+    if child.is_some() {
+        writeln!(f, "{}  children: [", &indent_str)?;
+        while let Some(next_child) = child {
+            write_node(next_child, indent + 2, f)?;
+            child = next_child.next_sibling.get();
+        }
+        writeln!(f, "{}  ]", &indent_str)?;
+    }
+    writeln!(f, "{}}}", &indent_str)
 }
 
 impl<'arena> Sink<'arena> {
@@ -458,9 +485,11 @@ impl<'arena> Serialize for Node<'arena> {
                 }
             }
 
-            (&ChildrenOnly(_), _) => {},
+            (&ChildrenOnly(_), _) => {}
 
-            (&IncludeNode, &NodeData::Doctype { ref name, .. }) => serializer.write_doctype(&name)?,
+            (&IncludeNode, &NodeData::Doctype { ref name, .. }) => {
+                serializer.write_doctype(&name)?
+            }
             (&IncludeNode, &NodeData::Text { ref contents }) => {
                 serializer.write_text(&contents.borrow())?
             }

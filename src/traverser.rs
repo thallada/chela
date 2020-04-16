@@ -4,7 +4,7 @@ use std::io::{self, Error, Read};
 
 use html5ever::{serialize, Attribute, LocalName, QualName};
 
-use crate::arena_dom::{html5ever_parse_slice_into_arena, Arena, Node, Ref};
+use crate::arena_dom::{create_element, html5ever_parse_slice_into_arena, Arena, Node, Ref};
 
 // TODO: I don't love the "Traverser" name. Should maybe come up with something else.
 // (it also unwraps nodes and calls transformer functions... does a lot more than traverse)
@@ -62,6 +62,14 @@ where
         if let Some(sibling) = node.next_sibling.get() {
             self.traverse(sibling);
         }
+    }
+
+    // TODO: how to call this from transformer functions?
+    pub fn create_element(&'arena self, name: &str) -> Ref<'arena> {
+        create_element(
+            &self.arena,
+            QualName::new(None, ns!(), LocalName::from(name)),
+        )
     }
 }
 

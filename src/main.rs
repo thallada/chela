@@ -12,7 +12,7 @@ extern crate typed_arena;
 
 use std::collections::HashSet;
 use std::default::Default;
-use std::io::{self, Read};
+use std::io;
 
 use html5ever::tendril::StrTendril;
 use html5ever::{serialize, Attribute, LocalName, QualName};
@@ -33,7 +33,7 @@ mod config;
 mod css_parser;
 mod traverser;
 
-use arena_dom::{create_element, html5ever_parse_slice_into_arena, Arena, NodeData, Ref};
+use arena_dom::{create_element, Arena, NodeData, Ref};
 use config::permissive::{ADD_ATTRIBUTES, ALL_ATTRIBUTES, ATTRIBUTES, ELEMENTS, PROTOCOLS};
 use config::relaxed::{CSS_AT_RULES, CSS_PROPERTIES};
 use css_at_rule::CssAtRule;
@@ -45,12 +45,12 @@ fn main() {
     let traverser = Traverser::new(
         &should_unwrap_node,
         vec![
-            Box::new(&sanitize_style_tag_css),
-            Box::new(&sanitize_style_attribute_css),
-            Box::new(&remove_attributes),
-            Box::new(&add_attributes),
-            Box::new(&sanitize_attribute_protocols),
-            Box::new(&add_single_elements_around_ul),
+            &sanitize_style_tag_css,
+            &sanitize_style_attribute_css,
+            &remove_attributes,
+            &add_attributes,
+            &sanitize_attribute_protocols,
+            &add_single_elements_around_ul,
         ],
     );
     let root = traverser.parse(&mut io::stdin()).unwrap();
@@ -106,7 +106,7 @@ fn css_rules_to_string(rules: Vec<CssRule>) -> String {
 // TODO: separate this out into multiple separate transformers
 // TODO: find a way to avoid passing the arena to transformer functions. It's an implementation
 // detail that doesn't need to be exposed. Also, it's only needed for creating new elements.
-fn sanitize_style_tag_css<'arena>(node: Ref<'arena>, arena: Arena<'arena>) -> bool {
+fn sanitize_style_tag_css<'arena>(node: Ref<'arena>, _: Arena<'arena>) {
     if let NodeData::Text { ref contents } = node.data {
         // TODO: seems rather expensive to lookup the parent on every Text node. Better
         // solution would be to pass some sort of context from the parent that marks that this
@@ -119,17 +119,14 @@ fn sanitize_style_tag_css<'arena>(node: Ref<'arena>, arena: Arena<'arena>) -> bo
                     let sanitized_css = css_rules_to_string(rules);
                     dbg!(&sanitized_css);
                     contents.replace(StrTendril::from(sanitized_css));
-                    return true;
                 }
             }
         }
     }
-    false
 }
 
-fn sanitize_style_attribute_css<'arena>(node: Ref<'arena>, arena: Arena<'arena>) -> bool {
+fn sanitize_style_attribute_css<'arena>(node: Ref<'arena>, _: Arena<'arena>) {
     if let NodeData::Element { ref attrs, .. } = node.data {
-        let mut has_transformed = false;
         for attr in attrs.borrow_mut().iter_mut() {
             if attr.name.local == local_name!("style") {
                 let css_str = &attr.value;
@@ -146,23 +143,19 @@ fn sanitize_style_attribute_css<'arena>(node: Ref<'arena>, arena: Arena<'arena>)
                 let sanitized_css = sanitized_css.trim();
                 dbg!(&sanitized_css);
                 attr.value = StrTendril::from(sanitized_css);
-                has_transformed = true;
             }
         }
-        return has_transformed;
     }
-    false
 }
 
-fn remove_attributes<'arena>(node: Ref<'arena>, arena: Arena<'arena>) -> bool {
+fn remove_attributes<'arena>(node: Ref<'arena>, _: Arena<'arena>) {
     if let NodeData::Element {
         ref attrs,
         ref name,
         ..
     } = node.data
     {
-        let mut has_transformed = false;
-        let ref mut attrs = attrs.borrow_mut();
+        let attrs = &mut attrs.borrow_mut();
         let mut allowed_attrs: HashSet<LocalName> = ALL_ATTRIBUTES.clone();
         if let Some(element_attrs) = ATTRIBUTES.get(&name.local) {
             allowed_attrs = allowed_attrs.union(element_attrs).cloned().collect();
@@ -172,24 +165,20 @@ fn remove_attributes<'arena>(node: Ref<'arena>, arena: Arena<'arena>) -> bool {
         while i != attrs.len() {
             if !allowed_attrs.contains(&attrs[i].name.local) {
                 attrs.remove(i);
-                has_transformed = true;
             }
             i += 1;
         }
-        return has_transformed;
     }
-    false
 }
 
-fn add_attributes<'arena>(node: Ref<'arena>, arena: Arena<'arena>) -> bool {
+fn add_attributes<'arena>(node: Ref<'arena>, _: Arena<'arena>) {
     if let NodeData::Element {
         ref attrs,
         ref name,
         ..
     } = node.data
     {
-        let mut has_transformed = false;
-        let ref mut attrs = attrs.borrow_mut();
+        let attrs = &mut attrs.borrow_mut();
 
         if let Some(add_attributes) = ADD_ATTRIBUTES.get(&name.local) {
             for (name, &value) in add_attributes.iter() {
@@ -197,23 +186,19 @@ fn add_attributes<'arena>(node: Ref<'arena>, arena: Arena<'arena>) -> bool {
                     name: QualName::new(None, ns!(), name.clone()),
                     value: StrTendril::from(value),
                 });
-                has_transformed = true;
             }
         }
-        return has_transformed;
     }
-    false
 }
 
-fn sanitize_attribute_protocols<'arena>(node: Ref<'arena>, arena: Arena<'arena>) -> bool {
+fn sanitize_attribute_protocols<'arena>(node: Ref<'arena>, _: Arena<'arena>) {
     if let NodeData::Element {
         ref attrs,
         ref name,
         ..
     } = node.data
     {
-        let mut has_transformed = false;
-        let ref mut attrs = attrs.borrow_mut();
+        let attrs = &mut attrs.borrow_mut();
 
         if let Some(protocols) = PROTOCOLS.get(&name.local) {
             let mut i = 0;
@@ -223,51 +208,33 @@ fn sanitize_attribute_protocols<'arena>(node: Ref<'arena>, arena: Arena<'arena>)
                         Ok(url) => {
                             if !allowed_protocols.contains(url.scheme()) {
                                 attrs.remove(i);
-                                has_transformed = true;
                             } else {
                                 i += 1;
                             }
                         }
                         Err(ParseError::RelativeUrlWithoutBase) => {
                             attrs[i].value = StrTendril::from(format!("http://{}", attrs[i].value));
-                            has_transformed = true;
                             i += 1;
                         }
                         Err(_) => {
                             attrs.remove(i);
-                            has_transformed = true;
                         }
                     }
                 } else {
                     i += 1;
                 }
             }
-            return has_transformed;
         }
     }
-    false
 }
 
-fn add_single_elements_around_ul<'arena>(node: Ref<'arena>, arena: Arena<'arena>) -> bool {
-    if let NodeData::Element {
-        ref attrs,
-        ref name,
-        ..
-    } = node.data
-    {
+fn add_single_elements_around_ul<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
+    if let NodeData::Element { ref name, .. } = node.data {
         if let local_name!("ul") = name.local {
-            node.insert_before(create_element(
-                arena,
-                QualName::new(None, ns!(), LocalName::from("single")),
-            ));
-            node.insert_after(create_element(
-                arena,
-                QualName::new(None, ns!(), LocalName::from("single")),
-            ));
-            return true;
+            node.insert_before(create_element(arena, "single"));
+            node.insert_after(create_element(arena, "single"));
         }
     }
-    false
 }
 
 fn should_unwrap_node(node: Ref) -> bool {

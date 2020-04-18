@@ -1,10 +1,8 @@
 extern crate typed_arena;
 
-use std::io::{self, Error, Read};
+use std::io::{Error, Read};
 
-use html5ever::{serialize, Attribute, LocalName, QualName};
-
-use crate::arena_dom::{create_element, html5ever_parse_slice_into_arena, Arena, Node, Ref};
+use crate::arena_dom::{html5ever_parse_slice_into_arena, Arena, Node, Ref};
 
 // TODO: I don't love the "Traverser" name. Should maybe come up with something else.
 // (it also unwraps nodes and calls transformer functions... does a lot more than traverse)
@@ -17,7 +15,7 @@ where
 {
     arena: typed_arena::Arena<Node<'arena>>,
     should_unwrap: T,
-    transformers: Vec<Box<&'arena dyn Fn(Ref<'arena>, Arena<'arena>) -> bool>>,
+    transformers: Vec<&'arena dyn Fn(Ref<'arena>, Arena<'arena>)>,
 }
 
 impl<'arena, T> Traverser<'arena, T>
@@ -26,7 +24,7 @@ where
 {
     pub fn new(
         should_unwrap: T,
-        transformers: Vec<Box<&'arena dyn Fn(Ref<'arena>, Arena<'arena>) -> bool>>,
+        transformers: Vec<&'arena dyn Fn(Ref<'arena>, Arena<'arena>)>,
     ) -> Traverser<'arena, T> {
         Traverser {
             arena: typed_arena::Arena::new(),
@@ -42,7 +40,6 @@ where
     }
 
     pub fn traverse(&'arena self, node: Ref<'arena>) {
-        println!("{}", &node);
         if (self.should_unwrap)(node) {
             if let Some(unwrapped_node) = node.unwrap() {
                 return self.traverse(unwrapped_node);
@@ -52,7 +49,7 @@ where
         }
 
         for transformer in self.transformers.iter() {
-            println!("transformer result: {}", transformer(node, &self.arena));
+            transformer(node, &self.arena);
         }
 
         if let Some(child) = node.first_child.get() {
@@ -63,45 +60,125 @@ where
             self.traverse(sibling);
         }
     }
-
-    // TODO: how to call this from transformer functions?
-    pub fn create_element(&'arena self, name: &str) -> Ref<'arena> {
-        create_element(
-            &self.arena,
-            QualName::new(None, ns!(), LocalName::from(name)),
-        )
-    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
 
-    use std::fs::File;
+    use std::str;
 
-    struct MockRead;
+    use html5ever::serialize;
+
+    use crate::arena_dom::{create_element, NodeData};
+
+    struct MockRead {
+        contents: &'static str,
+    }
+
+    impl MockRead {
+        fn new(contents: &'static str) -> MockRead {
+            MockRead { contents }
+        }
+    }
 
     impl Read for MockRead {
-        fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+        fn read(&mut self, _: &mut [u8]) -> Result<usize, Error> {
             Ok(1)
         }
 
         fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, Error> {
-            buf.extend_from_slice(b"<div></div>");
+            buf.extend_from_slice(self.contents.as_bytes());
             Ok(1)
         }
     }
 
+    // fn node_contains_tag<'arena>(node: Ref<'arena>, tag_name: &str) -> bool {
+        // if let NodeData::Element { ref name, .. } = node.data {
+            // if name.local == LocalName::from(tag_name) {
+                // return true;
+            // }
+        // }
+
+        // if let Some(child) = node.first_child.get() {
+            // if node_contains_tag(child, tag_name) {
+                // return true;
+            // }
+        // }
+
+        // if let Some(sibling) = node.next_sibling.get() {
+            // if node_contains_tag(sibling, tag_name) {
+                // return true;
+            // }
+        // }
+
+        // false
+    // }
+
+    // fn count_nodes(node: Ref) -> usize {
+        // let mut count = 1;
+
+        // if let Some(child) = node.first_child.get() {
+            // count += count_nodes(child);
+        // }
+
+        // if let Some(sibling) = node.next_sibling.get() {
+            // count += count_nodes(sibling);
+        // }
+
+        // count
+    // }
+
+    fn assert_serialized_html_eq(node: Ref, expected: &str) {
+        let mut output = vec![];
+        serialize(&mut output, node, Default::default()).unwrap();
+        assert_eq!(str::from_utf8(&output).unwrap(), expected);
+    }
+
     #[test]
     fn traversal() {
-        let mut traverser = Traverser::new(
-            |node| false,
-            vec![Box::new(&|n, _| false), Box::new(&|m, _| true)],
-        );
-        let mut mock_data = MockRead;
-        // let mut file = File::open("src/test/div.html").unwrap();
+        let traverser = Traverser::new(|_| false, vec![&|_, _| {}]);
+        let mut mock_data = MockRead::new("<div></div>");
         let root = traverser.parse(&mut mock_data).unwrap();
         traverser.traverse(root);
-        assert!(false);
+        assert_serialized_html_eq(root, "<html><head></head><body><div></div></body></html>");
+    }
+
+    #[test]
+    fn unwraps_element() {
+        let traverser = Traverser::new(
+            |node| {
+                if let NodeData::Element { ref name, .. } = node.data {
+                    return name.local == local_name!("div");
+                }
+                false
+            },
+            vec![&|_, _| {}],
+        );
+        let mut mock_data = MockRead::new("<div></div>");
+        let root = traverser.parse(&mut mock_data).unwrap();
+        traverser.traverse(root);
+        assert_serialized_html_eq(root, "<html><head></head><body></body></html>");
+    }
+
+    #[test]
+    fn adds_element() {
+        let traverser = Traverser::new(
+            |_| false,
+            vec![&|node, arena| {
+                if let NodeData::Element { ref name, .. } = node.data {
+                    if let local_name!("div") = name.local {
+                        node.insert_after(create_element(arena, "span"));
+                    }
+                }
+            }],
+        );
+        let mut mock_data = MockRead::new("<div></div>");
+        let root = traverser.parse(&mut mock_data).unwrap();
+        traverser.traverse(root);
+        assert_serialized_html_eq(
+            root,
+            "<html><head></head><body><div></div><span></span></body></html>",
+        );
     }
 }

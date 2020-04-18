@@ -25,11 +25,12 @@ use html5ever::interface::tree_builder::{ElementFlags, NodeOrText, QuirksMode, T
 use html5ever::serialize::TraversalScope::{ChildrenOnly, IncludeNode};
 use html5ever::serialize::{Serialize, Serializer, TraversalScope};
 use html5ever::tendril::{StrTendril, TendrilSink};
-use html5ever::{parse_document, Attribute, ExpandedName, QualName};
+use html5ever::{parse_document, Attribute, ExpandedName, LocalName, QualName};
 
+// TODO: does this function really belong here?
 pub fn html5ever_parse_slice_into_arena<'a>(bytes: &[u8], arena: Arena<'a>) -> Ref<'a> {
     let sink = Sink {
-        arena: arena,
+        arena,
         document: arena.alloc(Node::new(NodeData::Document)),
         quirks_mode: QuirksMode::NoQuirks,
     };
@@ -38,9 +39,9 @@ pub fn html5ever_parse_slice_into_arena<'a>(bytes: &[u8], arena: Arena<'a>) -> R
         .one(bytes)
 }
 
-pub fn create_element<'arena>(arena: Arena<'arena>, name: QualName) -> Ref<'arena> {
+pub fn create_element<'arena>(arena: Arena<'arena>, name: &str) -> Ref<'arena> {
     arena.alloc(Node::new(NodeData::Element {
-        name: name,
+        name: QualName::new(None, ns!(), LocalName::from(name)),
         attrs: RefCell::new(vec![]),
         template_contents: None,
         mathml_annotation_xml_integration_point: false,
@@ -103,7 +104,7 @@ impl<'arena> Node<'arena> {
             next_sibling: Cell::new(None),
             first_child: Cell::new(None),
             last_child: Cell::new(None),
-            data: data,
+            data,
         }
     }
 
@@ -163,14 +164,9 @@ impl<'arena> Node<'arena> {
         }
 
         let mut child = first_child;
-        loop {
-            match child {
-                Some(next_child) => {
-                    next_child.parent.set(parent);
-                    child = next_child.next_sibling.get();
-                }
-                None => break,
-            }
+        while let Some(next_child) = child {
+            next_child.parent.set(parent);
+            child = next_child.next_sibling.get();
         }
 
         if let Some(first_child) = first_child {
@@ -351,7 +347,7 @@ impl<'arena> TreeSink for Sink<'arena> {
         flags: ElementFlags,
     ) -> Ref<'arena> {
         self.new_node(NodeData::Element {
-            name: name,
+            name,
             attrs: RefCell::new(attrs),
             template_contents: if flags.template {
                 Some(self.new_node(NodeData::Document))
@@ -368,7 +364,7 @@ impl<'arena> TreeSink for Sink<'arena> {
 
     fn create_pi(&mut self, target: StrTendril, data: StrTendril) -> Ref<'arena> {
         self.new_node(NodeData::ProcessingInstruction {
-            target: target,
+            target,
             contents: data,
         })
     }
@@ -409,9 +405,9 @@ impl<'arena> TreeSink for Sink<'arena> {
         system_id: StrTendril,
     ) {
         self.document.append(self.new_node(NodeData::Doctype {
-            name: name,
-            public_id: public_id,
-            system_id: system_id,
+            name,
+            public_id,
+            system_id,
         }))
     }
 

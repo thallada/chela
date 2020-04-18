@@ -4,32 +4,30 @@ use std::io::{Error, Read};
 
 use crate::arena_dom::{html5ever_parse_slice_into_arena, Arena, Node, Ref};
 
-// TODO: I don't love the "Traverser" name. Should maybe come up with something else.
-// (it also unwraps nodes and calls transformer functions... does a lot more than traverse)
 // TODO: What are the performance implications of using a vec of boxed closures instead of one
 // transformer function who's size is known at compile time (U: Fn(Ref<'arena>) -> bool)?
 // TODO: how to integrate CSS parsing and transforming?
-pub struct Traverser<'arena, T>
+pub struct Transformer<'arena, T>
 where
     T: Fn(Ref) -> bool,
 {
     arena: typed_arena::Arena<Node<'arena>>,
     should_unwrap: T,
-    transformers: Vec<&'arena dyn Fn(Ref<'arena>, Arena<'arena>)>,
+    transformer_fns: Vec<&'arena dyn Fn(Ref<'arena>, Arena<'arena>)>,
 }
 
-impl<'arena, T> Traverser<'arena, T>
+impl<'arena, T> Transformer<'arena, T>
 where
     T: Fn(Ref) -> bool,
 {
     pub fn new(
         should_unwrap: T,
         transformers: Vec<&'arena dyn Fn(Ref<'arena>, Arena<'arena>)>,
-    ) -> Traverser<'arena, T> {
-        Traverser {
+    ) -> Transformer<'arena, T> {
+        Transformer {
             arena: typed_arena::Arena::new(),
             should_unwrap,
-            transformers,
+            transformer_fns: transformers,
         }
     }
 
@@ -48,7 +46,7 @@ where
             }
         }
 
-        for transformer in self.transformers.iter() {
+        for transformer in self.transformer_fns.iter() {
             transformer(node, &self.arena);
         }
 
@@ -137,16 +135,16 @@ mod test {
 
     #[test]
     fn traversal() {
-        let traverser = Traverser::new(|_| false, vec![&|_, _| {}]);
+        let transformer = Transformer::new(|_| false, vec![&|_, _| {}]);
         let mut mock_data = MockRead::new("<div></div>");
-        let root = traverser.parse(&mut mock_data).unwrap();
-        traverser.traverse(root);
+        let root = transformer.parse(&mut mock_data).unwrap();
+        transformer.traverse(root);
         assert_serialized_html_eq(root, "<html><head></head><body><div></div></body></html>");
     }
 
     #[test]
     fn unwraps_element() {
-        let traverser = Traverser::new(
+        let transformer = Transformer::new(
             |node| {
                 if let NodeData::Element { ref name, .. } = node.data {
                     return name.local == local_name!("div");
@@ -156,14 +154,14 @@ mod test {
             vec![&|_, _| {}],
         );
         let mut mock_data = MockRead::new("<div></div>");
-        let root = traverser.parse(&mut mock_data).unwrap();
-        traverser.traverse(root);
+        let root = transformer.parse(&mut mock_data).unwrap();
+        transformer.traverse(root);
         assert_serialized_html_eq(root, "<html><head></head><body></body></html>");
     }
 
     #[test]
     fn adds_element() {
-        let traverser = Traverser::new(
+        let transformer = Transformer::new(
             |_| false,
             vec![&|node, arena| {
                 if let NodeData::Element { ref name, .. } = node.data {
@@ -174,8 +172,8 @@ mod test {
             }],
         );
         let mut mock_data = MockRead::new("<div></div>");
-        let root = traverser.parse(&mut mock_data).unwrap();
-        traverser.traverse(root);
+        let root = transformer.parse(&mut mock_data).unwrap();
+        transformer.traverse(root);
         assert_serialized_html_eq(
             root,
             "<html><head></head><body><div></div><span></span></body></html>",

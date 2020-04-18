@@ -31,7 +31,7 @@ mod css_at_rule {
 mod arena_dom;
 mod config;
 mod css_parser;
-mod traverser;
+mod transformer;
 
 use arena_dom::{create_element, Arena, NodeData, Ref};
 use config::permissive::{ADD_ATTRIBUTES, ALL_ATTRIBUTES, ATTRIBUTES, ELEMENTS, PROTOCOLS};
@@ -39,10 +39,10 @@ use config::relaxed::{CSS_AT_RULES, CSS_PROPERTIES};
 use css_at_rule::CssAtRule;
 use css_parser::{parse_css_style_attribute, parse_css_stylesheet, CssRule};
 use css_property::CssProperty;
-use traverser::Traverser;
+use transformer::Transformer;
 
 fn main() {
-    let traverser = Traverser::new(
+    let transformer = Transformer::new(
         &should_unwrap_node,
         vec![
             &sanitize_style_tag_css,
@@ -53,8 +53,8 @@ fn main() {
             &add_single_elements_around_ul,
         ],
     );
-    let root = traverser.parse(&mut io::stdin()).unwrap();
-    traverser.traverse(root);
+    let root = transformer.parse(&mut io::stdin()).unwrap();
+    transformer.traverse(root);
     serialize(&mut io::stdout(), root, Default::default()).expect("serialization failed")
 }
 

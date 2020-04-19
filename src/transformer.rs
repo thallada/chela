@@ -1,10 +1,12 @@
-extern crate typed_arena;
-
 use std::io::{Error, Read};
 
-use crate::arena_dom::{html5ever_parse_slice_into_arena, Arena, Node, Ref};
+use html5ever::interface::tree_builder::QuirksMode;
+use html5ever::tendril::TendrilSink;
+use html5ever::{parse_document, parse_fragment, QualName};
 
-// TODO: What are the performance implications of using a vec of boxed closures instead of one
+use crate::arena_dom::{Arena, Node, NodeData, Ref, Sink};
+
+// TODO: What are the performance implications of using a vec of closures instead of one
 // transformer function who's size is known at compile time (U: Fn(Ref<'arena>) -> bool)?
 // TODO: how to integrate CSS parsing and transforming?
 pub struct Transformer<'arena, T>
@@ -31,10 +33,35 @@ where
         }
     }
 
-    pub fn parse(&'arena self, data: &mut impl Read) -> Result<Ref<'arena>, Error> {
+    pub fn parse_document(&'arena self, data: &mut impl Read) -> Result<Ref<'arena>, Error> {
         let mut bytes = Vec::new();
         data.read_to_end(&mut bytes)?;
-        Ok(html5ever_parse_slice_into_arena(&bytes, &self.arena))
+        let sink = Sink {
+            arena: &self.arena,
+            document: self.arena.alloc(Node::new(NodeData::Document)),
+            quirks_mode: QuirksMode::NoQuirks,
+        };
+        Ok(parse_document(sink, Default::default())
+            .from_utf8()
+            .one(&bytes[..]))
+    }
+
+    pub fn parse_fragment(&'arena self, data: &mut impl Read) -> Result<Ref<'arena>, Error> {
+        let mut bytes = Vec::new();
+        data.read_to_end(&mut bytes)?;
+        let sink = Sink {
+            arena: &self.arena,
+            document: self.arena.alloc(Node::new(NodeData::Document)),
+            quirks_mode: QuirksMode::NoQuirks,
+        };
+        Ok(parse_fragment(
+            sink,
+            Default::default(),
+            QualName::new(None, ns!(html), local_name!("body")),
+            vec![],
+        )
+        .from_utf8()
+        .one(&bytes[..]))
     }
 
     pub fn traverse(&'arena self, node: Ref<'arena>) {
@@ -92,39 +119,39 @@ mod test {
     }
 
     // fn node_contains_tag<'arena>(node: Ref<'arena>, tag_name: &str) -> bool {
-        // if let NodeData::Element { ref name, .. } = node.data {
-            // if name.local == LocalName::from(tag_name) {
-                // return true;
-            // }
-        // }
+    // if let NodeData::Element { ref name, .. } = node.data {
+    // if name.local == LocalName::from(tag_name) {
+    // return true;
+    // }
+    // }
 
-        // if let Some(child) = node.first_child.get() {
-            // if node_contains_tag(child, tag_name) {
-                // return true;
-            // }
-        // }
+    // if let Some(child) = node.first_child.get() {
+    // if node_contains_tag(child, tag_name) {
+    // return true;
+    // }
+    // }
 
-        // if let Some(sibling) = node.next_sibling.get() {
-            // if node_contains_tag(sibling, tag_name) {
-                // return true;
-            // }
-        // }
+    // if let Some(sibling) = node.next_sibling.get() {
+    // if node_contains_tag(sibling, tag_name) {
+    // return true;
+    // }
+    // }
 
-        // false
+    // false
     // }
 
     // fn count_nodes(node: Ref) -> usize {
-        // let mut count = 1;
+    // let mut count = 1;
 
-        // if let Some(child) = node.first_child.get() {
-            // count += count_nodes(child);
-        // }
+    // if let Some(child) = node.first_child.get() {
+    // count += count_nodes(child);
+    // }
 
-        // if let Some(sibling) = node.next_sibling.get() {
-            // count += count_nodes(sibling);
-        // }
+    // if let Some(sibling) = node.next_sibling.get() {
+    // count += count_nodes(sibling);
+    // }
 
-        // count
+    // count
     // }
 
     fn assert_serialized_html_eq(node: Ref, expected: &str) {
@@ -137,9 +164,9 @@ mod test {
     fn traversal() {
         let transformer = Transformer::new(|_| false, vec![&|_, _| {}]);
         let mut mock_data = MockRead::new("<div></div>");
-        let root = transformer.parse(&mut mock_data).unwrap();
+        let root = transformer.parse_fragment(&mut mock_data).unwrap();
         transformer.traverse(root);
-        assert_serialized_html_eq(root, "<html><head></head><body><div></div></body></html>");
+        assert_serialized_html_eq(root, "<html><div></div></html>");
     }
 
     #[test]
@@ -154,9 +181,9 @@ mod test {
             vec![&|_, _| {}],
         );
         let mut mock_data = MockRead::new("<div></div>");
-        let root = transformer.parse(&mut mock_data).unwrap();
+        let root = transformer.parse_fragment(&mut mock_data).unwrap();
         transformer.traverse(root);
-        assert_serialized_html_eq(root, "<html><head></head><body></body></html>");
+        assert_serialized_html_eq(root, "<html></html>");
     }
 
     #[test]
@@ -172,11 +199,8 @@ mod test {
             }],
         );
         let mut mock_data = MockRead::new("<div></div>");
-        let root = transformer.parse(&mut mock_data).unwrap();
+        let root = transformer.parse_fragment(&mut mock_data).unwrap();
         transformer.traverse(root);
-        assert_serialized_html_eq(
-            root,
-            "<html><head></head><body><div></div><span></span></body></html>",
-        );
+        assert_serialized_html_eq(root, "<html><div></div><span></span></html>");
     }
 }

@@ -53,7 +53,7 @@ fn main() {
             &add_single_elements_around_ul,
         ],
     );
-    let root = transformer.parse(&mut io::stdin()).unwrap();
+    let root = transformer.parse_fragment(&mut io::stdin()).unwrap();
     transformer.traverse(root);
     serialize(&mut io::stdout(), root, Default::default()).expect("serialization failed")
 }
@@ -103,7 +103,7 @@ fn css_rules_to_string(rules: Vec<CssRule>) -> String {
 // DONE: add whitelist of CSS properties, remove any not in it
 // TODO: scope selectors in rich formatter
 // TODO: add class attributes to elements in rich formatter
-// TODO: separate this out into multiple separate transformers
+// DONE: separate this out into multiple separate transformers
 // TODO: find a way to avoid passing the arena to transformer functions. It's an implementation
 // detail that doesn't need to be exposed. Also, it's only needed for creating new elements.
 fn sanitize_style_tag_css<'arena>(node: Ref<'arena>, _: Arena<'arena>) {

@@ -16,7 +16,6 @@ extern crate typed_arena;
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
-use std::default::Default;
 use std::fmt;
 use std::io;
 use std::ptr;
@@ -24,24 +23,12 @@ use std::ptr;
 use html5ever::interface::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
 use html5ever::serialize::TraversalScope::{ChildrenOnly, IncludeNode};
 use html5ever::serialize::{Serialize, Serializer, TraversalScope};
-use html5ever::tendril::{StrTendril, TendrilSink};
-use html5ever::{parse_document, Attribute, ExpandedName, LocalName, QualName};
-
-// TODO: does this function really belong here?
-pub fn html5ever_parse_slice_into_arena<'a>(bytes: &[u8], arena: Arena<'a>) -> Ref<'a> {
-    let sink = Sink {
-        arena,
-        document: arena.alloc(Node::new(NodeData::Document)),
-        quirks_mode: QuirksMode::NoQuirks,
-    };
-    parse_document(sink, Default::default())
-        .from_utf8()
-        .one(bytes)
-}
+use html5ever::tendril::StrTendril;
+use html5ever::{Attribute, ExpandedName, LocalName, QualName};
 
 pub fn create_element<'arena>(arena: Arena<'arena>, name: &str) -> Ref<'arena> {
     arena.alloc(Node::new(NodeData::Element {
-        name: QualName::new(None, ns!(), LocalName::from(name)),
+        name: QualName::new(None, ns!(html), LocalName::from(name)),
         attrs: RefCell::new(vec![]),
         template_contents: None,
         mathml_annotation_xml_integration_point: false,
@@ -55,9 +42,9 @@ pub type Ref<'arena> = &'arena Node<'arena>;
 pub type Link<'arena> = Cell<Option<Ref<'arena>>>;
 
 pub struct Sink<'arena> {
-    arena: Arena<'arena>,
-    document: Ref<'arena>,
-    quirks_mode: QuirksMode,
+    pub arena: Arena<'arena>,
+    pub document: Ref<'arena>,
+    pub quirks_mode: QuirksMode,
 }
 
 #[derive(Debug)]

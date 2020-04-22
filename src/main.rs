@@ -11,11 +11,10 @@ extern crate string_cache;
 extern crate typed_arena;
 
 use std::collections::HashSet;
-use std::default::Default;
 use std::io;
 
 use html5ever::tendril::StrTendril;
-use html5ever::{serialize, Attribute, LocalName, QualName};
+use html5ever::{Attribute, LocalName, QualName};
 
 use url::{ParseError, Url};
 
@@ -31,19 +30,20 @@ mod css_at_rule {
 mod arena_dom;
 mod config;
 mod css_parser;
-mod transformer;
+mod sanitizer;
 
 use arena_dom::{create_element, Arena, NodeData, Ref};
-use config::permissive::{ADD_ATTRIBUTES, ALL_ATTRIBUTES, ATTRIBUTES, ELEMENTS, PROTOCOLS};
+use config::permissive::{ADD_ATTRIBUTES, ALL_ATTRIBUTES, ATTRIBUTES, PROTOCOLS};
 use config::relaxed::{CSS_AT_RULES, CSS_PROPERTIES};
+use config::default::DEFAULT_CONFIG;
 use css_at_rule::CssAtRule;
 use css_parser::{parse_css_style_attribute, parse_css_stylesheet, CssRule};
 use css_property::CssProperty;
-use transformer::Transformer;
+use sanitizer::Sanitizer;
 
 fn main() {
-    let transformer = Transformer::new(
-        &should_unwrap_node,
+    let sanitizer = Sanitizer::new(
+        &DEFAULT_CONFIG,
         vec![
             &sanitize_style_tag_css,
             &sanitize_style_attribute_css,
@@ -53,9 +53,7 @@ fn main() {
             &add_single_elements_around_ul,
         ],
     );
-    let root = transformer.parse_fragment(&mut io::stdin()).unwrap();
-    transformer.traverse(root);
-    serialize(&mut io::stdout(), root, Default::default()).expect("serialization failed")
+    sanitizer.sanitize_fragment(&mut io::stdin(), &mut io::stdout()).unwrap();
 }
 
 fn css_rules_to_string(rules: Vec<CssRule>) -> String {
@@ -234,16 +232,5 @@ fn add_single_elements_around_ul<'arena>(node: Ref<'arena>, arena: Arena<'arena>
             node.insert_before(create_element(arena, "single"));
             node.insert_after(create_element(arena, "single"));
         }
-    }
-}
-
-fn should_unwrap_node(node: Ref) -> bool {
-    match node.data {
-        NodeData::Document
-        | NodeData::Doctype { .. }
-        | NodeData::Text { .. }
-        | NodeData::ProcessingInstruction { .. } => false,
-        NodeData::Comment { .. } => true,
-        NodeData::Element { ref name, .. } => !ELEMENTS.contains(&name.local),
     }
 }

@@ -158,8 +158,6 @@ impl<'arena> Node<'arena> {
 
         if let Some(first_child) = first_child {
             Some(first_child)
-        } else if let Some(next_sibling) = next_sibling {
-            Some(next_sibling)
         } else {
             None
         }

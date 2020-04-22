@@ -220,6 +220,27 @@ impl<'arena> fmt::Display for Node<'arena> {
     }
 }
 
+impl<'arena> fmt::Display for NodeData<'arena> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NodeData::Document => write!(f, "Document"),
+            NodeData::Doctype { name, .. } => write!(f, "Doctype: {}", name),
+            NodeData::Text { contents } => write!(
+                f,
+                "Text: {}...",
+                &contents.borrow().chars().take(10).collect::<String>()
+            ),
+            NodeData::ProcessingInstruction { .. } => write!(f, "ProcessingInstruction: ..."),
+            NodeData::Comment { contents } => write!(
+                f,
+                "Comment: {}...",
+                &contents.chars().take(10).collect::<String>()
+            ),
+            NodeData::Element { ref name, .. } => write!(f, "Element: {}", &name.local),
+        }
+    }
+}
+
 fn write_node<'arena>(
     node: &Node<'arena>,
     indent: usize,
@@ -227,16 +248,44 @@ fn write_node<'arena>(
 ) -> fmt::Result {
     let indent_str = "  ".repeat(indent);
     writeln!(f, "{}Node {{", &indent_str)?;
-    writeln!(f, "{}  data: {:?}", &indent_str, node.data)?;
-    let mut child = node.first_child.get();
-    if child.is_some() {
-        writeln!(f, "{}  children: [", &indent_str)?;
-        while let Some(next_child) = child {
-            write_node(next_child, indent + 2, f)?;
-            child = next_child.next_sibling.get();
-        }
-        writeln!(f, "{}  ]", &indent_str)?;
+    writeln!(f, "{}  data: {}", &indent_str, node.data)?;
+
+    if let Some(parent) = node.parent.get() {
+        writeln!(f, "{}  parent: ", &indent_str)?;
+        write_linked_node(parent, indent + 2, f)?;
     }
+
+    if let Some(next_sibling) = node.next_sibling.get() {
+        writeln!(f, "{}  next_sibling: ", &indent_str)?;
+        write_linked_node(next_sibling, indent + 2, f)?;
+    }
+
+    if let Some(previous_sibling) = node.previous_sibling.get() {
+        writeln!(f, "{}  previous_sibling: ", &indent_str)?;
+        write_linked_node(previous_sibling, indent + 2, f)?;
+    }
+
+    if let Some(first_child) = node.first_child.get() {
+        writeln!(f, "{}  first_child: ", &indent_str)?;
+        write_linked_node(first_child, indent + 2, f)?;
+    }
+
+    if let Some(last_child) = node.last_child.get() {
+        writeln!(f, "{}  last_child: ", &indent_str)?;
+        write_linked_node(last_child, indent + 2, f)?;
+    }
+
+    writeln!(f, "{}}}", &indent_str)
+}
+
+fn write_linked_node<'arena>(
+    node: &Node<'arena>,
+    indent: usize,
+    f: &mut fmt::Formatter<'_>,
+) -> fmt::Result {
+    let indent_str = "  ".repeat(indent);
+    writeln!(f, "{}Node {{", &indent_str)?;
+    writeln!(f, "{}  data: {}", &indent_str, node.data)?;
     writeln!(f, "{}}}", &indent_str)
 }
 

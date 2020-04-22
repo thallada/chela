@@ -97,13 +97,18 @@ impl<'arena> Sanitizer<'arena> {
         if self.should_unwrap_node(node) {
             let sibling = node.next_sibling.get();
 
+            println!("unwrapping node");
             if self.should_remove_contents_when_unwrapped(node) {
+                println!("detaching node");
                 node.detach();
+                println!("post-detach: {}", &node);
             } else if let Some(unwrapped_node) = node.unwrap() {
+                println!("traversing unwrapped node");
                 self.traverse(unwrapped_node);
             }
 
             if let Some(sibling) = sibling {
+                println!("traversing sibling");
                 self.traverse(sibling);
             }
 
@@ -316,7 +321,6 @@ mod test {
         assert_eq!(str::from_utf8(&output).unwrap(), "<html><div></div></html>");
     }
 
-    // FIXME: this is failing, need to fix the traversal & detach algorithm
     #[test]
     fn remove_script_elements_and_content_in_separate_sub_trees() {
         let mut disallow_script_config = EMPTY_CONFIG.clone();
@@ -328,7 +332,7 @@ mod test {
             .insert(local_name!("script"));
         let sanitizer = Sanitizer::new(&disallow_script_config, vec![]);
         let mut mock_data = MockRead::new(
-            "<div><script>alert('haX0rz')</script><div><div><script>two</script></div>",
+            "<div><script>alert('haX0rz')</script></div><div><script>two</script></div>",
         );
         let mut output = vec![];
         sanitizer

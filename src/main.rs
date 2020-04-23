@@ -33,9 +33,9 @@ mod css_parser;
 mod sanitizer;
 
 use arena_dom::{create_element, Arena, NodeData, Ref};
+use config::default::DEFAULT_CONFIG;
 use config::permissive::{ADD_ATTRIBUTES, ALL_ATTRIBUTES, ATTRIBUTES, PROTOCOLS};
 use config::relaxed::{CSS_AT_RULES, CSS_PROPERTIES};
-use config::default::DEFAULT_CONFIG;
 use css_at_rule::CssAtRule;
 use css_parser::{parse_css_style_attribute, parse_css_stylesheet, CssRule};
 use css_property::CssProperty;
@@ -53,7 +53,9 @@ fn main() {
             &add_single_elements_around_ul,
         ],
     );
-    sanitizer.sanitize_fragment(&mut io::stdin(), &mut io::stdout()).unwrap();
+    sanitizer
+        .sanitize_fragment(&mut io::stdin(), &mut io::stdout())
+        .unwrap();
 }
 
 fn css_rules_to_string(rules: Vec<CssRule>) -> String {

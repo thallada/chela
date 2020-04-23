@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Error, Read, Write};
+use url::{ParseError, Url};
 
 use html5ever::interface::tree_builder::QuirksMode;
-use html5ever::tendril::TendrilSink;
-use html5ever::{parse_document, parse_fragment, serialize, LocalName, QualName};
+use html5ever::tendril::{StrTendril, TendrilSink};
+use html5ever::{parse_document, parse_fragment, serialize, Attribute, LocalName, QualName};
 
 use crate::arena_dom::{Arena, Node, NodeData, Ref, Sink};
 use crate::css_at_rule::CssAtRule;
@@ -15,7 +16,7 @@ pub struct Sanitizer<'arena> {
     transformers: Vec<&'arena dyn Fn(Ref<'arena>, Arena<'arena>)>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SanitizerConfig {
     pub allow_comments: bool,
     pub allowed_elements: HashSet<LocalName>,
@@ -23,10 +24,16 @@ pub struct SanitizerConfig {
     pub allowed_attributes_per_element: HashMap<LocalName, HashSet<LocalName>>,
     pub add_attributes: HashMap<LocalName, &'static str>,
     pub add_attributes_per_element: HashMap<LocalName, HashMap<LocalName, &'static str>>,
-    pub allowed_protocols: HashMap<LocalName, HashMap<LocalName, HashSet<&'static str>>>,
+    pub allowed_protocols: HashMap<LocalName, HashMap<LocalName, HashSet<Protocol<'static>>>>,
     pub allowed_css_at_rules: HashSet<CssAtRule>,
     pub allowed_css_properties: HashSet<CssProperty>,
     pub remove_contents_when_unwrapped: HashSet<LocalName>,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub enum Protocol<'a> {
+    Scheme(&'a str),
+    Relative,
 }
 
 impl<'arena> Sanitizer<'arena> {
@@ -85,7 +92,7 @@ impl<'arena> Sanitizer<'arena> {
         Ok(parse_fragment(
             sink,
             Default::default(),
-            QualName::new(None, ns!(html), local_name!("body")),
+            QualName::new(None, ns!(), local_name!("body")),
             vec![],
         )
         .from_utf8()
@@ -116,6 +123,10 @@ impl<'arena> Sanitizer<'arena> {
         }
 
         println!("TRANSFORMING: {}", &node);
+        self.remove_attributes(node);
+        self.add_attributes(node);
+        self.sanitize_attribute_protocols(node);
+
         for transformer in self.transformers.iter() {
             transformer(node, &self.arena);
         }
@@ -131,7 +142,7 @@ impl<'arena> Sanitizer<'arena> {
         }
     }
 
-    fn should_unwrap_node(&'arena self, node: Ref) -> bool {
+    fn should_unwrap_node(&self, node: Ref) -> bool {
         match node.data {
             NodeData::Document
             | NodeData::Doctype { .. }
@@ -144,7 +155,7 @@ impl<'arena> Sanitizer<'arena> {
         }
     }
 
-    fn should_remove_contents_when_unwrapped(&'arena self, node: Ref) -> bool {
+    fn should_remove_contents_when_unwrapped(&self, node: Ref) -> bool {
         match node.data {
             NodeData::Document
             | NodeData::Doctype { .. }
@@ -155,6 +166,109 @@ impl<'arena> Sanitizer<'arena> {
                 .config
                 .remove_contents_when_unwrapped
                 .contains(&name.local),
+        }
+    }
+
+    fn remove_attributes(&self, node: Ref<'arena>) {
+        if let NodeData::Element {
+            ref attrs,
+            ref name,
+            ..
+        } = node.data
+        {
+            let attrs = &mut attrs.borrow_mut();
+            let mut i = 0;
+            let all_allowed = &self.config.allowed_attributes;
+            let per_element_allowed = self.config.allowed_attributes_per_element.get(&name.local);
+            while i != attrs.len() {
+                if !all_allowed.contains(&attrs[i].name.local) {
+                    if let Some(per_element_allowed) = per_element_allowed {
+                        if per_element_allowed.contains(&attrs[i].name.local) {
+                            i += 1;
+                            continue;
+                        }
+                    }
+                    attrs.remove(i);
+                    continue;
+                }
+                i += 1;
+            }
+        }
+    }
+
+    fn add_attributes(&self, node: Ref<'arena>) {
+        if let NodeData::Element {
+            ref attrs,
+            ref name,
+            ..
+        } = node.data
+        {
+            let attrs = &mut attrs.borrow_mut();
+            let add_attributes = &self.config.add_attributes;
+            let add_attributes_per_element =
+                self.config.add_attributes_per_element.get(&name.local);
+
+            for (name, &value) in add_attributes.iter() {
+                attrs.push(Attribute {
+                    name: QualName::new(None, ns!(), name.clone()),
+                    value: StrTendril::from(value),
+                });
+            }
+
+            if let Some(add_attributes_per_element) = add_attributes_per_element {
+                for (name, &value) in add_attributes_per_element.iter() {
+                    attrs.push(Attribute {
+                        name: QualName::new(None, ns!(), name.clone()),
+                        value: StrTendril::from(value),
+                    });
+                }
+            }
+        }
+    }
+
+    fn sanitize_attribute_protocols(&self, node: Ref<'arena>) {
+        if let NodeData::Element {
+            ref attrs,
+            ref name,
+            ..
+        } = node.data
+        {
+            let attrs = &mut attrs.borrow_mut();
+
+            if let Some(protocols) = self.config.allowed_protocols.get(&name.local) {
+                dbg!(protocols);
+                dbg!(&attrs);
+                let mut i = 0;
+                while i != attrs.len() {
+                    dbg!(&attrs[i].name.local);
+                    if let Some(allowed_protocols) = protocols.get(&attrs[i].name.local) {
+                        dbg!(allowed_protocols);
+                        match Url::parse(&attrs[i].value) {
+                            Ok(url) => {
+                                dbg!(Protocol::Scheme(url.scheme()));
+                                if !allowed_protocols.contains(&Protocol::Scheme(url.scheme())) {
+                                    attrs.remove(i);
+                                } else {
+                                    i += 1;
+                                }
+                            }
+                            Err(ParseError::RelativeUrlWithoutBase) => {
+                                dbg!("relative");
+                                if !allowed_protocols.contains(&Protocol::Relative) {
+                                    attrs.remove(i);
+                                } else {
+                                    i += 1;
+                                }
+                            }
+                            Err(_) => {
+                                attrs.remove(i);
+                            }
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
         }
     }
 }
@@ -338,6 +452,174 @@ mod test {
         sanitizer
             .sanitize_fragment(&mut mock_data, &mut output)
             .unwrap();
-        assert_eq!(str::from_utf8(&output).unwrap(), "<html><div></div><div></div></html>");
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<html><div></div><div></div></html>"
+        );
+    }
+
+    #[test]
+    fn remove_attributes() {
+        let mut remove_attributes_config = EMPTY_CONFIG.clone();
+        remove_attributes_config.allowed_elements.extend(vec![
+            local_name!("html"),
+            local_name!("a"),
+            local_name!("img"),
+            local_name!("span"),
+        ]);
+        remove_attributes_config
+            .allowed_attributes
+            .extend(vec![local_name!("href"), local_name!("src")]);
+        let sanitizer = Sanitizer::new(&remove_attributes_config, vec![]);
+        let mut mock_data = MockRead::new(
+            "<a href=\"url\"></a>\
+                <img src=\"url\" bad=\"1\" />\
+                <span bad=\"2\" foo=\"bar\"></span>",
+        );
+        let mut output = vec![];
+        sanitizer
+            .sanitize_fragment(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<html><a href=\"url\"></a>\
+                <img src=\"url\"></img>\
+                <span></span></html>"
+        );
+    }
+
+    #[test]
+    fn remove_attributes_per_element() {
+        let mut remove_attributes_config = EMPTY_CONFIG.clone();
+        remove_attributes_config.allowed_elements.extend(vec![
+            local_name!("html"),
+            local_name!("a"),
+            local_name!("img"),
+            local_name!("span"),
+        ]);
+        remove_attributes_config
+            .allowed_attributes_per_element
+            .insert(local_name!("a"), hashset! { local_name!("href") });
+        remove_attributes_config
+            .allowed_attributes_per_element
+            .insert(local_name!("img"), hashset! { local_name!("src") });
+        let sanitizer = Sanitizer::new(&remove_attributes_config, vec![]);
+        let mut mock_data = MockRead::new(
+            "<a href=\"url\" src=\"url\" bad=\"1\"></a>\
+                <img src=\"url\" href=\"url\" />\
+                <span href=\"url\" src=\"url\"></span>",
+        );
+        let mut output = vec![];
+        sanitizer
+            .sanitize_fragment(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<html><a href=\"url\"></a>\
+                <img src=\"url\"></img>\
+                <span></span></html>"
+        );
+    }
+
+    #[test]
+    fn add_attributes() {
+        let mut add_attributes_config = EMPTY_CONFIG.clone();
+        add_attributes_config
+            .allowed_elements
+            .extend(vec![local_name!("html"), local_name!("div")]);
+        add_attributes_config
+            .add_attributes
+            .insert(LocalName::from("foo"), "bar");
+        let sanitizer = Sanitizer::new(&add_attributes_config, vec![]);
+        let mut mock_data = MockRead::new("<div></div>");
+        let mut output = vec![];
+        sanitizer
+            .sanitize_fragment(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<html foo=\"bar\"><div foo=\"bar\"></div></html>"
+        );
+    }
+
+    #[test]
+    fn add_attributes_per_element() {
+        let mut add_attributes_config = EMPTY_CONFIG.clone();
+        add_attributes_config.allowed_elements.extend(vec![
+            local_name!("html"),
+            local_name!("a"),
+            local_name!("img"),
+        ]);
+        add_attributes_config.add_attributes_per_element.insert(
+            local_name!("a"),
+            hashmap! { LocalName::from("href") => "url1" },
+        );
+        add_attributes_config.add_attributes_per_element.insert(
+            local_name!("img"),
+            hashmap! { LocalName::from("src") => "url2" },
+        );
+        let sanitizer = Sanitizer::new(&add_attributes_config, vec![]);
+        let mut mock_data = MockRead::new("<a><img /></a>");
+        let mut output = vec![];
+        sanitizer
+            .sanitize_fragment(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<html><a href=\"url1\"><img src=\"url2\"></img></a></html>"
+        );
+    }
+
+    #[test]
+    fn sanitize_attribute_protocols() {
+        let mut sanitize_protocols_config = EMPTY_CONFIG.clone();
+        sanitize_protocols_config.allowed_elements.extend(vec![
+            local_name!("html"),
+            local_name!("a"),
+            local_name!("img"),
+        ]);
+        sanitize_protocols_config
+            .allowed_attributes
+            .extend(vec![local_name!("href"), local_name!("src")]);
+        sanitize_protocols_config.allowed_protocols.insert(
+            local_name!("a"),
+            hashmap! {
+                LocalName::from("href") => hashset! {
+                    Protocol::Scheme("https"),
+                },
+            },
+        );
+        sanitize_protocols_config.allowed_protocols.insert(
+            local_name!("img"),
+            hashmap! {
+                LocalName::from("src") => hashset! {
+                    Protocol::Scheme("http"),
+                    Protocol::Scheme("https"),
+                    Protocol::Relative,
+                },
+            },
+        );
+        let sanitizer = Sanitizer::new(&sanitize_protocols_config, vec![]);
+        let mut mock_data = MockRead::new(
+            "<a href=\"/relative\"></a>\
+            <a href=\"https://example.com\"></a>\
+            <a href=\"http://example.com\"></a>\
+            <img src=\"/relative\" />\
+            <img src=\"https://example.com\" />\
+            <img src=\"http://example.com\" />",
+        );
+        let mut output = vec![];
+        sanitizer
+            .sanitize_fragment(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<html><a></a>\
+            <a href=\"https://example.com\"></a>\
+            <a></a>\
+            <img src=\"/relative\"></img>\
+            <img src=\"https://example.com\"></img>\
+            <img src=\"http://example.com\"></img></html>"
+        );
     }
 }

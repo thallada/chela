@@ -28,7 +28,7 @@ use html5ever::{Attribute, ExpandedName, LocalName, QualName};
 
 pub fn create_element<'arena>(arena: Arena<'arena>, name: &str) -> Ref<'arena> {
     arena.alloc(Node::new(NodeData::Element {
-        name: QualName::new(None, ns!(html), LocalName::from(name)),
+        name: QualName::new(None, ns!(), LocalName::from(name)),
         attrs: RefCell::new(vec![]),
         template_contents: None,
         mathml_annotation_xml_integration_point: false,

@@ -8,6 +8,8 @@ use html5ever::{parse_document, parse_fragment, serialize, Attribute, LocalName,
 
 use crate::arena_dom::{Arena, Node, NodeData, Ref, Sink};
 use crate::css_at_rule::CssAtRule;
+use crate::css_parser::{parse_css_style_attribute, parse_css_stylesheet, CssRule};
+use crate::css_parser_2::parse_and_serialize;
 use crate::css_property::CssProperty;
 
 pub struct Sanitizer<'arena> {
@@ -126,6 +128,9 @@ impl<'arena> Sanitizer<'arena> {
         self.remove_attributes(node);
         self.add_attributes(node);
         self.sanitize_attribute_protocols(node);
+        self.sanitize_style_tag_css(node);
+        // self.sanitize_style_attribute_css(node);
+        // self.serialize_css_test(node);
 
         for transformer in self.transformers.iter() {
             transformer(node, &self.arena);
@@ -266,6 +271,105 @@ impl<'arena> Sanitizer<'arena> {
                         }
                     } else {
                         i += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    fn serialize_sanitized_css_rules(&self, rules: Vec<CssRule>) -> String {
+        let mut sanitized_css = String::new();
+        for rule in rules {
+            match rule {
+                CssRule::StyleRule(style_rule) => {
+                    sanitized_css += &style_rule.selectors;
+                    sanitized_css += "{";
+                    for declaration in style_rule.declarations.into_iter() {
+                        let declaration_string = &declaration.to_string();
+                        if self
+                            .config
+                            .allowed_css_properties
+                            .contains(&CssProperty::from(declaration.property))
+                        {
+                            sanitized_css += declaration_string;
+                        }
+                    }
+                    sanitized_css += "}";
+                }
+                CssRule::AtRule(at_rule) => {
+                    dbg!(&at_rule);
+                    if self
+                        .config
+                        .allowed_css_at_rules
+                        .contains(&CssAtRule::from(at_rule.name.clone()))
+                    {
+                        sanitized_css += &format!("@{}", &at_rule.name);
+                        sanitized_css += &at_rule.prelude;
+                        if let Some(block) = at_rule.block {
+                            sanitized_css += "{";
+                            sanitized_css += &self.serialize_sanitized_css_rules(block);
+                            sanitized_css += "}";
+                        }
+                    }
+                }
+            }
+        }
+        sanitized_css
+    }
+
+    fn sanitize_style_tag_css(&self, node: Ref<'arena>) {
+        if let NodeData::Text { ref contents } = node.data {
+            // TODO: seems rather expensive to lookup the parent on every Text node. Better
+            // solution would be to pass some sort of context from the parent that marks that this
+            // Text node is inside a <style>.
+            if let Some(parent) = node.parent.get() {
+                if let NodeData::Element { ref name, .. } = parent.data {
+                    if name.local == local_name!("style") {
+                        let rules = parse_css_stylesheet(&contents.borrow());
+                        dbg!(&rules);
+                        let sanitized_css = self.serialize_sanitized_css_rules(rules);
+                        dbg!(&sanitized_css);
+                        contents.replace(StrTendril::from(sanitized_css));
+                    }
+                }
+            }
+        }
+    }
+
+    fn sanitize_style_attribute_css(&self, node: Ref<'arena>) {
+        if let NodeData::Element { ref attrs, .. } = node.data {
+            for attr in attrs.borrow_mut().iter_mut() {
+                if attr.name.local == local_name!("style") {
+                    let css_str = &attr.value;
+                    let declarations = parse_css_style_attribute(css_str);
+                    dbg!(&declarations);
+                    let mut sanitized_css = String::new();
+                    for declaration in declarations.into_iter() {
+                        let declaration_string = &declaration.to_string();
+                        if self
+                            .config
+                            .allowed_css_properties
+                            .contains(&CssProperty::from(declaration.property))
+                        {
+                            sanitized_css += declaration_string;
+                            sanitized_css += " ";
+                        }
+                    }
+                    let sanitized_css = sanitized_css.trim();
+                    dbg!(&sanitized_css);
+                    attr.value = StrTendril::from(sanitized_css);
+                }
+            }
+        }
+    }
+
+    fn serialize_css_test(&self, node: Ref<'arena>) {
+        if let NodeData::Text { ref contents } = node.data {
+            if let Some(parent) = node.parent.get() {
+                if let NodeData::Element { ref name, .. } = parent.data {
+                    if name.local == local_name!("style") {
+                        let mut serialized_css = String::new();
+                        parse_and_serialize(contents.borrow(), &mut serialized_css, true);
                     }
                 }
             }
@@ -620,6 +724,35 @@ mod test {
             <img src=\"/relative\"></img>\
             <img src=\"https://example.com\"></img>\
             <img src=\"http://example.com\"></img></html>"
+        );
+    }
+
+    #[test]
+    fn sanitize_style_tag_css() {
+        let mut sanitize_css_config = EMPTY_CONFIG.clone();
+        sanitize_css_config
+            .allowed_elements
+            .extend(vec![local_name!("html"), local_name!("style")]);
+        sanitize_css_config
+            .allowed_css_properties
+            .extend(vec![css_property!("margin"), css_property!("color")]);
+        sanitize_css_config
+            .allowed_css_at_rules
+            .extend(vec![css_at_rule!("charset")]);
+        let sanitizer = Sanitizer::new(&sanitize_css_config, vec![]);
+        let mut mock_data = MockRead::new(
+            "<style>@charset \"UTF-8\";\
+            div { margin: 10px; padding: 10px; color: red; }\
+            @media print { div { margin: 50px; } }</style>",
+        );
+        let mut output = vec![];
+        sanitizer
+            .sanitize_fragment(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<html><style>@charset \"UTF-8\";\
+            div { margin: 10px; color: red; }</style></html>"
         );
     }
 }

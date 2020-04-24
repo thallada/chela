@@ -1,10 +1,11 @@
 use cssparser::{
-    AtRuleParser, AtRuleType, CowRcStr, DeclarationListParser, DeclarationParser, ParseError, Parser,
-    ParserInput, QualifiedRuleParser, RuleListParser, SourceLocation,
+    AtRuleParser, AtRuleType, CowRcStr, DeclarationListParser, DeclarationParser, ParseError,
+    Parser, ParserInput, QualifiedRuleParser, RuleListParser, SourceLocation, ToCss, Token,
+    TokenSerializationType,
 };
-use std::fmt;
 use std::convert::Into;
 use std::error::Error;
+use std::fmt;
 
 #[derive(Debug)]
 pub enum CssRule {
@@ -57,19 +58,30 @@ impl<'i> AtRuleParser<'i> for CssParser {
         name: CowRcStr<'i>,
         input: &mut Parser<'i, 't>,
     ) -> Result<AtRuleType<Self::PreludeNoBlock, Self::PreludeBlock>, CssParseError<'i>> {
-        let position = input.position();
-        while input.next().is_ok() {}
+        // let position = input.position();
+        // while input.next_including_whitespace_and_comments().is_ok() {}
+        let mut prelude = String::new();
+        let mut previous_token = TokenSerializationType::nothing();
+        while let Ok(token) = input.next_including_whitespace_and_comments() {
+            let token_type = token.serialization_type();
+            if previous_token.needs_separator_when_before(token_type) {
+                prelude.push_str("/**/");
+            }
+            previous_token = token_type;
+            token.to_css(&mut prelude).unwrap();
+            // TODO: do I need to handle parse_nested_block here?
+        }
         match_ignore_ascii_case! { &*name,
             "import" | "namespace" | "charset" => {
                 Ok(AtRuleType::WithoutBlock(CssAtRulePrelude {
                     name: name.to_string(),
-                    prelude: input.slice_from(position).to_string(),
+                    prelude,
                 }))
             },
             _ => {
                 Ok(AtRuleType::WithBlock(CssAtRulePrelude {
                     name: name.to_string(),
-                    prelude: input.slice_from(position).to_string(),
+                    prelude,
                 }))
             }
         }
@@ -79,7 +91,7 @@ impl<'i> AtRuleParser<'i> for CssParser {
         &mut self,
         prelude: Self::PreludeBlock,
         _location: SourceLocation,
-        input: &mut Parser<'i, 't>
+        input: &mut Parser<'i, 't>,
     ) -> Result<Self::AtRule, CssParseError<'i>> {
         let rule_list_parser = RuleListParser::new_for_stylesheet(input, CssParser);
         let mut rules = Vec::new();
@@ -105,7 +117,7 @@ impl<'i> AtRuleParser<'i> for CssParser {
     fn rule_without_block(
         &mut self,
         prelude: Self::PreludeNoBlock,
-        _location: SourceLocation
+        _location: SourceLocation,
     ) -> Self::AtRule {
         CssRule::AtRule(CssAtRule {
             name: prelude.name,
@@ -124,9 +136,20 @@ impl<'i> QualifiedRuleParser<'i> for CssParser {
         &mut self,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self::Prelude, CssParseError<'i>> {
-        let position = input.position();
-        while input.next().is_ok() {}
-        Ok(input.slice_from(position).to_string())
+        // let position = input.position();
+        let mut prelude = String::new();
+        let mut previous_token = TokenSerializationType::nothing();
+        while let Ok(token) = input.next_including_whitespace_and_comments() {
+            let token_type = token.serialization_type();
+            if previous_token.needs_separator_when_before(token_type) {
+                prelude.push_str("/**/");
+            }
+            previous_token = token_type;
+            dbg!(&token);
+            token.to_css(&mut prelude).unwrap();
+            // TODO: do I need to handle parse_nested_block here?
+        }
+        Ok(prelude)
     }
 
     fn parse_block<'t>(
@@ -184,14 +207,26 @@ impl<'i> DeclarationParser<'i> for CssDeclarationParser {
         input: &mut Parser<'i, 't>,
     ) -> Result<Self::Declaration, ParseError<'i, CssError>> {
         dbg!(&name);
-        let start = input.position();
-        input.next()?;
-        let value = input.slice_from(start);
+        // let start = input.position();
+        let mut value = String::new();
+        let mut previous_token = TokenSerializationType::nothing();
+        while let Ok(token) = input.next_including_whitespace_and_comments() {
+            let token_type = token.serialization_type();
+            if previous_token.needs_separator_when_before(token_type) {
+                value.push_str("/**/");
+            }
+            previous_token = token_type;
+            dbg!(&token);
+            token.to_css(&mut value).unwrap();
+            // TODO: do I need to handle parse_nested_block here?
+        }
+        // input.next_including_whitespace_and_comments()?;
+        // let value = input.slice_from(start);
         dbg!(&value);
 
         Ok(vec![CssDeclaration {
             property: name.to_string(),
-            value: value.trim().to_string(),
+            value: value.to_string(),
         }])
     }
 }
@@ -227,12 +262,12 @@ pub fn parse_declarations<'i>(
 
 impl fmt::Display for CssDeclaration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {};", self.property, self.value)
+        write!(f, "{}:{};", self.property, self.value)
     }
 }
 
 impl Into<String> for CssDeclaration {
     fn into(self) -> String {
-        format!("{}: {};", self.property, self.value)
+        format!("{}:{};", self.property, self.value)
     }
 }

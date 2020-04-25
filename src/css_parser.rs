@@ -35,6 +35,7 @@ pub struct CssDeclaration {
     pub value: String,
 }
 
+#[derive(Debug)]
 struct CssAtRulePrelude {
     name: String,
     prelude: String,
@@ -145,7 +146,6 @@ impl<'i> QualifiedRuleParser<'i> for CssParser {
                 prelude.push_str("/**/");
             }
             previous_token = token_type;
-            dbg!(&token);
             token.to_css(&mut prelude).unwrap();
             // TODO: do I need to handle parse_nested_block here?
         }
@@ -206,7 +206,6 @@ impl<'i> DeclarationParser<'i> for CssDeclarationParser {
         name: CowRcStr<'i>,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self::Declaration, ParseError<'i, CssError>> {
-        dbg!(&name);
         // let start = input.position();
         let mut value = String::new();
         let mut previous_token = TokenSerializationType::nothing();
@@ -216,26 +215,45 @@ impl<'i> DeclarationParser<'i> for CssDeclarationParser {
                 value.push_str("/**/");
             }
             previous_token = token_type;
-            dbg!(&token);
             token.to_css(&mut value).unwrap();
             // TODO: do I need to handle parse_nested_block here?
         }
         // input.next_including_whitespace_and_comments()?;
         // let value = input.slice_from(start);
-        dbg!(&value);
 
         Ok(vec![CssDeclaration {
             property: name.to_string(),
-            value: value.to_string(),
+            value,
         }])
     }
 }
 
 impl<'i> AtRuleParser<'i> for CssDeclarationParser {
-    type PreludeBlock = ();
-    type PreludeNoBlock = ();
+    type PreludeBlock = CssAtRulePrelude;
+    type PreludeNoBlock = CssAtRulePrelude;
     type AtRule = Vec<CssDeclaration>;
     type Error = CssError;
+
+    fn parse_prelude<'t>(
+        &mut self,
+        name: CowRcStr<'i>,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<AtRuleType<Self::PreludeNoBlock, Self::PreludeBlock>, CssParseError<'i>> {
+        let mut prelude = String::new();
+        Ok(AtRuleType::WithBlock(CssAtRulePrelude {
+            name: name.to_string(),
+            prelude,
+        }))
+    }
+
+    fn parse_block<'t>(
+        &mut self,
+        prelude: Self::PreludeBlock,
+        _location: SourceLocation,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<Self::AtRule, CssParseError<'i>> {
+        Ok(vec![])
+    }
 }
 
 pub fn parse_declarations<'i>(

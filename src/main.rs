@@ -24,7 +24,6 @@ mod css_at_rule {
 mod arena_dom;
 mod config;
 mod css_parser;
-mod css_parser_2;
 mod sanitizer;
 
 use arena_dom::{create_element, Arena, NodeData, Ref};

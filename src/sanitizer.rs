@@ -9,8 +9,8 @@ use html5ever::{parse_document, parse_fragment, serialize, Attribute, LocalName,
 use crate::arena_dom::{Arena, Node, NodeData, Ref, Sink};
 use crate::css_at_rule::CssAtRule;
 use crate::css_parser::{parse_css_style_attribute, parse_css_stylesheet, CssRule};
-use crate::css_parser_2::parse_and_serialize;
 use crate::css_property::CssProperty;
+use crate::css_token_parser::parse_and_serialize;
 
 pub struct Sanitizer<'arena> {
     arena: typed_arena::Arena<Node<'arena>>,
@@ -29,6 +29,7 @@ pub struct SanitizerConfig {
     pub allowed_protocols: HashMap<LocalName, HashMap<LocalName, HashSet<Protocol<'static>>>>,
     pub allowed_css_at_rules: HashSet<CssAtRule>,
     pub allowed_css_properties: HashSet<CssProperty>,
+    pub allow_css_comments: bool,
     pub remove_contents_when_unwrapped: HashSet<LocalName>,
 }
 
@@ -129,7 +130,7 @@ impl<'arena> Sanitizer<'arena> {
         self.add_attributes(node);
         self.sanitize_attribute_protocols(node);
         self.sanitize_style_tag_css(node);
-        // self.sanitize_style_attribute_css(node);
+        self.sanitize_style_attribute_css(node);
         // self.serialize_css_test(node);
 
         for transformer in self.transformers.iter() {
@@ -241,16 +242,11 @@ impl<'arena> Sanitizer<'arena> {
             let attrs = &mut attrs.borrow_mut();
 
             if let Some(protocols) = self.config.allowed_protocols.get(&name.local) {
-                dbg!(protocols);
-                dbg!(&attrs);
                 let mut i = 0;
                 while i != attrs.len() {
-                    dbg!(&attrs[i].name.local);
                     if let Some(allowed_protocols) = protocols.get(&attrs[i].name.local) {
-                        dbg!(allowed_protocols);
                         match Url::parse(&attrs[i].value) {
                             Ok(url) => {
-                                dbg!(Protocol::Scheme(url.scheme()));
                                 if !allowed_protocols.contains(&Protocol::Scheme(url.scheme())) {
                                     attrs.remove(i);
                                 } else {
@@ -258,7 +254,6 @@ impl<'arena> Sanitizer<'arena> {
                                 }
                             }
                             Err(ParseError::RelativeUrlWithoutBase) => {
-                                dbg!("relative");
                                 if !allowed_protocols.contains(&Protocol::Relative) {
                                     attrs.remove(i);
                                 } else {
@@ -294,10 +289,9 @@ impl<'arena> Sanitizer<'arena> {
                             sanitized_css += declaration_string;
                         }
                     }
-                    sanitized_css += "}";
+                    sanitized_css += " }";
                 }
                 CssRule::AtRule(at_rule) => {
-                    dbg!(&at_rule);
                     if self
                         .config
                         .allowed_css_at_rules
@@ -308,7 +302,9 @@ impl<'arena> Sanitizer<'arena> {
                         if let Some(block) = at_rule.block {
                             sanitized_css += "{";
                             sanitized_css += &self.serialize_sanitized_css_rules(block);
-                            sanitized_css += "}";
+                            sanitized_css += " }";
+                        } else {
+                            sanitized_css += "; ";
                         }
                     }
                 }
@@ -326,9 +322,7 @@ impl<'arena> Sanitizer<'arena> {
                 if let NodeData::Element { ref name, .. } = parent.data {
                     if name.local == local_name!("style") {
                         let rules = parse_css_stylesheet(&contents.borrow());
-                        dbg!(&rules);
                         let sanitized_css = self.serialize_sanitized_css_rules(rules);
-                        dbg!(&sanitized_css);
                         contents.replace(StrTendril::from(sanitized_css));
                     }
                 }
@@ -342,7 +336,6 @@ impl<'arena> Sanitizer<'arena> {
                 if attr.name.local == local_name!("style") {
                     let css_str = &attr.value;
                     let declarations = parse_css_style_attribute(css_str);
-                    dbg!(&declarations);
                     let mut sanitized_css = String::new();
                     for declaration in declarations.into_iter() {
                         let declaration_string = &declaration.to_string();
@@ -356,7 +349,6 @@ impl<'arena> Sanitizer<'arena> {
                         }
                     }
                     let sanitized_css = sanitized_css.trim();
-                    dbg!(&sanitized_css);
                     attr.value = StrTendril::from(sanitized_css);
                 }
             }
@@ -369,7 +361,7 @@ impl<'arena> Sanitizer<'arena> {
                 if let NodeData::Element { ref name, .. } = parent.data {
                     if name.local == local_name!("style") {
                         let mut serialized_css = String::new();
-                        parse_and_serialize(contents.borrow(), &mut serialized_css, true);
+                        parse_and_serialize(contents.borrow(), &mut serialized_css, self.config);
                     }
                 }
             }
@@ -415,6 +407,7 @@ mod test {
             allowed_protocols: HashMap::new(),
             allowed_css_at_rules: HashSet::new(),
             allowed_css_properties: HashSet::new(),
+            allow_css_comments: false,
             remove_contents_when_unwrapped: HashSet::new(),
         };
     }
@@ -728,31 +721,27 @@ mod test {
     }
 
     #[test]
-    fn sanitize_style_tag_css() {
+    fn sanitize_style_attribute_css() {
         let mut sanitize_css_config = EMPTY_CONFIG.clone();
         sanitize_css_config
             .allowed_elements
-            .extend(vec![local_name!("html"), local_name!("style")]);
+            .extend(vec![local_name!("html"), local_name!("div")]);
+        sanitize_css_config
+            .allowed_attributes
+            .extend(vec![local_name!("style")]);
         sanitize_css_config
             .allowed_css_properties
             .extend(vec![css_property!("margin"), css_property!("color")]);
-        sanitize_css_config
-            .allowed_css_at_rules
-            .extend(vec![css_at_rule!("charset")]);
         let sanitizer = Sanitizer::new(&sanitize_css_config, vec![]);
-        let mut mock_data = MockRead::new(
-            "<style>@charset \"UTF-8\";\
-            div { margin: 10px; padding: 10px; color: red; }\
-            @media print { div { margin: 50px; } }</style>",
-        );
+        let mut mock_data =
+            MockRead::new("<div style=\"margin: 10px; padding: 10px; color: red;\"></div>");
         let mut output = vec![];
         sanitizer
             .sanitize_fragment(&mut mock_data, &mut output)
             .unwrap();
         assert_eq!(
             str::from_utf8(&output).unwrap(),
-            "<html><style>@charset \"UTF-8\";\
-            div { margin: 10px; color: red; }</style></html>"
+            "<html><div style=\"margin: 10px; color: red;\"></div></html>"
         );
     }
 }

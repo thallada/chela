@@ -13,6 +13,7 @@ lazy_static! {
         allowed_protocols: HashMap::new(),
         allowed_css_at_rules: HashSet::new(),
         allowed_css_properties: HashSet::new(),
+        allow_css_comments: false,
         remove_contents_when_unwrapped: hashset! {
             local_name!("iframe"),
             local_name!("noembed"),

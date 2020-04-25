@@ -10,7 +10,6 @@ use crate::arena_dom::{Arena, Node, NodeData, Ref, Sink};
 use crate::css_at_rule::CssAtRule;
 use crate::css_parser::{parse_css_style_attribute, parse_css_stylesheet, CssRule};
 use crate::css_property::CssProperty;
-use crate::css_token_parser::parse_and_serialize;
 
 pub struct Sanitizer<'arena> {
     arena: typed_arena::Arena<Node<'arena>>,
@@ -21,6 +20,7 @@ pub struct Sanitizer<'arena> {
 #[derive(Debug, Clone)]
 pub struct SanitizerConfig {
     pub allow_comments: bool,
+    pub allow_doctype: bool,
     pub allowed_elements: HashSet<LocalName>,
     pub allowed_attributes: HashSet<LocalName>,
     pub allowed_attributes_per_element: HashMap<LocalName, HashSet<LocalName>>,
@@ -103,29 +103,22 @@ impl<'arena> Sanitizer<'arena> {
     }
 
     fn traverse(&'arena self, node: Ref<'arena>) {
-        println!("{}", &node);
         if self.should_unwrap_node(node) {
             let sibling = node.next_sibling.get();
 
-            println!("unwrapping node");
             if self.should_remove_contents_when_unwrapped(node) {
-                println!("detaching node");
                 node.detach();
-                println!("post-detach: {}", &node);
             } else if let Some(unwrapped_node) = node.unwrap() {
-                println!("traversing unwrapped node");
                 self.traverse(unwrapped_node);
             }
 
             if let Some(sibling) = sibling {
-                println!("traversing sibling");
                 self.traverse(sibling);
             }
 
             return;
         }
 
-        println!("TRANSFORMING: {}", &node);
         self.remove_attributes(node);
         self.add_attributes(node);
         self.sanitize_attribute_protocols(node);
@@ -138,23 +131,21 @@ impl<'arena> Sanitizer<'arena> {
         }
 
         if let Some(child) = node.first_child.get() {
-            println!("traversing child");
             self.traverse(child);
         }
 
         if let Some(sibling) = node.next_sibling.get() {
-            println!("traversing sibling");
             self.traverse(sibling);
         }
     }
 
     fn should_unwrap_node(&self, node: Ref) -> bool {
         match node.data {
-            NodeData::Document
-            | NodeData::Doctype { .. }
-            | NodeData::Text { .. }
-            | NodeData::ProcessingInstruction { .. } => false,
+            NodeData::Document | NodeData::Text { .. } | NodeData::ProcessingInstruction { .. } => {
+                false
+            }
             NodeData::Comment { .. } => !self.config.allow_comments,
+            NodeData::Doctype { .. } => !self.config.allow_doctype,
             NodeData::Element { ref name, .. } => {
                 !self.config.allowed_elements.contains(&name.local)
             }
@@ -354,19 +345,6 @@ impl<'arena> Sanitizer<'arena> {
             }
         }
     }
-
-    fn serialize_css_test(&self, node: Ref<'arena>) {
-        if let NodeData::Text { ref contents } = node.data {
-            if let Some(parent) = node.parent.get() {
-                if let NodeData::Element { ref name, .. } = parent.data {
-                    if name.local == local_name!("style") {
-                        let mut serialized_css = String::new();
-                        parse_and_serialize(contents.borrow(), &mut serialized_css, self.config);
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -399,6 +377,7 @@ mod test {
     lazy_static! {
         static ref EMPTY_CONFIG: SanitizerConfig = SanitizerConfig {
             allow_comments: false,
+            allow_doctype: false,
             allowed_elements: HashSet::new(),
             allowed_attributes: HashSet::new(),
             allowed_attributes_per_element: HashMap::new(),
@@ -436,6 +415,25 @@ mod test {
             .sanitize_fragment(&mut mock_data, &mut output)
             .unwrap();
         assert_eq!(str::from_utf8(&output).unwrap(), "<html><div></div></html>");
+    }
+
+    #[test]
+    fn allow_html_comments() {
+        let mut allow_comments_config = EMPTY_CONFIG.clone();
+        allow_comments_config.allow_comments = true;
+        allow_comments_config
+            .allowed_elements
+            .extend(vec![local_name!("html"), local_name!("div")]);
+        let sanitizer = Sanitizer::new(&allow_comments_config, vec![]);
+        let mut mock_data = MockRead::new("<div><!-- keep me --></div>");
+        let mut output = vec![];
+        sanitizer
+            .sanitize_fragment(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<html><div><!-- keep me --></div></html>"
+        );
     }
 
     #[test]
@@ -742,6 +740,41 @@ mod test {
         assert_eq!(
             str::from_utf8(&output).unwrap(),
             "<html><div style=\"margin: 10px; color: red;\"></div></html>"
+        );
+    }
+
+    #[test]
+    fn remove_doctype() {
+        let mut disallow_doctype_config = EMPTY_CONFIG.clone();
+        disallow_doctype_config.allow_doctype = false;
+        disallow_doctype_config
+            .allowed_elements
+            .extend(vec![local_name!("html"), local_name!("div")]);
+        let sanitizer = Sanitizer::new(&disallow_doctype_config, vec![]);
+        let mut mock_data = MockRead::new("<!DOCTYPE html><div></div>");
+        let mut output = vec![];
+        sanitizer
+            .sanitize_document(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(str::from_utf8(&output).unwrap(), "<html><div></div></html>");
+    }
+
+    #[test]
+    fn allow_doctype() {
+        let mut allow_doctype_config = EMPTY_CONFIG.clone();
+        allow_doctype_config.allow_doctype = true;
+        allow_doctype_config
+            .allowed_elements
+            .extend(vec![local_name!("html"), local_name!("div")]);
+        let sanitizer = Sanitizer::new(&allow_doctype_config, vec![]);
+        let mut mock_data = MockRead::new("<!DOCTYPE html><div></div>");
+        let mut output = vec![];
+        sanitizer
+            .sanitize_document(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<!DOCTYPE html><html><div></div></html>"
         );
     }
 }

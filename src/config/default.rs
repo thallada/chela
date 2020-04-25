@@ -5,6 +5,7 @@ use crate::sanitizer::SanitizerConfig;
 lazy_static! {
     pub static ref DEFAULT_CONFIG: SanitizerConfig = SanitizerConfig {
         allow_comments: false,
+        allow_doctype: false,
         allowed_elements: HashSet::new(),
         allowed_attributes: HashSet::new(),
         allowed_attributes_per_element: HashMap::new(),

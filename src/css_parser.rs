@@ -59,8 +59,6 @@ impl<'i> AtRuleParser<'i> for CssParser {
         name: CowRcStr<'i>,
         input: &mut Parser<'i, 't>,
     ) -> Result<AtRuleType<Self::PreludeNoBlock, Self::PreludeBlock>, CssParseError<'i>> {
-        // let position = input.position();
-        // while input.next_including_whitespace_and_comments().is_ok() {}
         let mut prelude = String::new();
         let mut previous_token = TokenSerializationType::nothing();
         while let Ok(token) = input.next_including_whitespace_and_comments() {
@@ -70,7 +68,6 @@ impl<'i> AtRuleParser<'i> for CssParser {
             }
             previous_token = token_type;
             token.to_css(&mut prelude).unwrap();
-            // TODO: do I need to handle parse_nested_block here?
         }
         match_ignore_ascii_case! { &*name,
             "import" | "namespace" | "charset" => {
@@ -137,7 +134,6 @@ impl<'i> QualifiedRuleParser<'i> for CssParser {
         &mut self,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self::Prelude, CssParseError<'i>> {
-        // let position = input.position();
         let mut prelude = String::new();
         let mut previous_token = TokenSerializationType::nothing();
         while let Ok(token) = input.next_including_whitespace_and_comments() {
@@ -147,7 +143,6 @@ impl<'i> QualifiedRuleParser<'i> for CssParser {
             }
             previous_token = token_type;
             token.to_css(&mut prelude).unwrap();
-            // TODO: do I need to handle parse_nested_block here?
         }
         Ok(prelude)
     }
@@ -206,7 +201,6 @@ impl<'i> DeclarationParser<'i> for CssDeclarationParser {
         name: CowRcStr<'i>,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self::Declaration, ParseError<'i, CssError>> {
-        // let start = input.position();
         let mut value = String::new();
         let mut previous_token = TokenSerializationType::nothing();
         while let Ok(token) = input.next_including_whitespace_and_comments() {
@@ -216,10 +210,7 @@ impl<'i> DeclarationParser<'i> for CssDeclarationParser {
             }
             previous_token = token_type;
             token.to_css(&mut value).unwrap();
-            // TODO: do I need to handle parse_nested_block here?
         }
-        // input.next_including_whitespace_and_comments()?;
-        // let value = input.slice_from(start);
 
         Ok(vec![CssDeclaration {
             property: name.to_string(),

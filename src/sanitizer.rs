@@ -122,9 +122,11 @@ impl<'arena> Sanitizer<'arena> {
         self.remove_attributes(node);
         self.add_attributes(node);
         self.sanitize_attribute_protocols(node);
+        // TODO: save the parsed CSS syntax tree from these methods onto the arena dom so that
+        // user-created transformers below will have access to modify them without having to
+        // re-parse.
         self.sanitize_style_tag_css(node);
         self.sanitize_style_attribute_css(node);
-        // self.serialize_css_test(node);
 
         for transformer in self.transformers.iter() {
             transformer(node, &self.arena);

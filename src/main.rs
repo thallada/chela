@@ -31,13 +31,12 @@ use config::default::DEFAULT_CONFIG;
 use sanitizer::Sanitizer;
 
 fn main() {
-    let sanitizer = Sanitizer::new(&DEFAULT_CONFIG, vec![&add_single_elements_around_ul]);
+    let sanitizer = Sanitizer::new(&DEFAULT_CONFIG, vec![&add_spacer_elements_around_ul]);
     sanitizer
         .sanitize_fragment(&mut io::stdin(), &mut io::stdout())
         .unwrap();
 }
 
-// TODO: make separate rich and plain transformers
 // DONE: add whitelist of tags, remove any not in it
 // DONE: add whitelist of attributes, remove any not in it
 // DONE: add map of tags to attributes, remove any on tag not in the mapped value
@@ -45,16 +44,14 @@ fn main() {
 // DONE: strip comments
 // DONE: parse style tags and attributes
 // DONE: add whitelist of CSS properties, remove any not in it
-// TODO: scope selectors in rich formatter
-// TODO: add class attributes to elements in rich formatter
 // DONE: separate this out into multiple separate transformers
 // TODO: find a way to avoid passing the arena to transformer functions. It's an implementation
 // detail that doesn't need to be exposed. Also, it's only needed for creating new elements.
-fn add_single_elements_around_ul<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
+fn add_spacer_elements_around_ul<'arena>(node: Ref<'arena>, arena: Arena<'arena>) {
     if let NodeData::Element { ref name, .. } = node.data {
         if let local_name!("ul") = name.local {
-            node.insert_before(create_element(arena, "single"));
-            node.insert_after(create_element(arena, "single"));
+            node.insert_before(create_element(arena, "spacer"));
+            node.insert_after(create_element(arena, "spacer"));
         }
     }
 }

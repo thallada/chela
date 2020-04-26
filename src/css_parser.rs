@@ -1,6 +1,6 @@
 use cssparser::{
     AtRuleParser, AtRuleType, CowRcStr, DeclarationListParser, DeclarationParser, ParseError,
-    Parser, ParserInput, QualifiedRuleParser, RuleListParser, SourceLocation, ToCss, Token,
+    Parser, ParserInput, QualifiedRuleParser, RuleListParser, SourceLocation, ToCss,
     TokenSerializationType,
 };
 use std::convert::Into;
@@ -220,31 +220,10 @@ impl<'i> DeclarationParser<'i> for CssDeclarationParser {
 }
 
 impl<'i> AtRuleParser<'i> for CssDeclarationParser {
-    type PreludeBlock = CssAtRulePrelude;
-    type PreludeNoBlock = CssAtRulePrelude;
+    type PreludeBlock = ();
+    type PreludeNoBlock = ();
     type AtRule = Vec<CssDeclaration>;
     type Error = CssError;
-
-    fn parse_prelude<'t>(
-        &mut self,
-        name: CowRcStr<'i>,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<AtRuleType<Self::PreludeNoBlock, Self::PreludeBlock>, CssParseError<'i>> {
-        let mut prelude = String::new();
-        Ok(AtRuleType::WithBlock(CssAtRulePrelude {
-            name: name.to_string(),
-            prelude,
-        }))
-    }
-
-    fn parse_block<'t>(
-        &mut self,
-        prelude: Self::PreludeBlock,
-        _location: SourceLocation,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self::AtRule, CssParseError<'i>> {
-        Ok(vec![])
-    }
 }
 
 pub fn parse_declarations<'i>(

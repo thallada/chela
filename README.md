@@ -20,6 +20,15 @@ Rust under the hood. The browser-grade
 [rust-cssparser](https://github.com/servo/rust-cssparser) are used to parse HTML 
 and CSS respectively.
 
+This project expands on [an example in the html5ever 
+repo](https://github.com/servo/html5ever/blob/7efca84c788bf9c9b4f314482b9630130812f994/html5ever/examples/arena.rs) 
+which parses the HTML tree into a cyclic node structure allocated in an arena 
+using the [typed-arena](https://github.com/SimonSapin/rust-typed-arena) crate.
+Allocating into the arena is not only very fast, but gets around tricky 
+borrow-checking issues in Rust to enable bi-directional tree structures that 
+provide the most flexibility in traversing the tree (being able to look up the 
+parents *and* the children of any given node).
+
 ## Why chela?
 
 At the time of writing, [ammonia](https://github.com/rust-ammonia/ammonia) is 

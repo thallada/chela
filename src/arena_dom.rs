@@ -123,6 +123,7 @@ impl<'arena> Node<'arena> {
         if let Some(next_sibling) = next_sibling {
             if let Some(last_child) = last_child {
                 next_sibling.previous_sibling.set(Some(last_child));
+                last_child.next_sibling.set(Some(next_sibling));
             } else {
                 next_sibling.previous_sibling.set(previous_sibling);
             }
@@ -138,6 +139,7 @@ impl<'arena> Node<'arena> {
         if let Some(previous_sibling) = previous_sibling {
             if let Some(first_child) = first_child {
                 previous_sibling.next_sibling.set(Some(first_child));
+                first_child.previous_sibling.set(Some(previous_sibling));
             } else {
                 previous_sibling.next_sibling.set(next_sibling);
             }

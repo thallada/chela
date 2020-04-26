@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::sanitizer::SanitizerConfig;
+use crate::sanitizer::{ContentWhitespace, SanitizerConfig};
 
 lazy_static! {
     pub static ref DEFAULT_CONFIG: SanitizerConfig = SanitizerConfig {
@@ -23,5 +23,32 @@ lazy_static! {
             local_name!("script"),
             local_name!("style"),
         },
+        whitespace_around_unwrapped_content: hashmap! {
+            local_name!("address") => ContentWhitespace::space_around(),
+            local_name!("article") => ContentWhitespace::space_around(),
+            local_name!("aside") => ContentWhitespace::space_around(),
+            local_name!("blockquote") => ContentWhitespace::space_around(),
+            local_name!("br") => ContentWhitespace::space_around(),
+            local_name!("dd") => ContentWhitespace::space_around(),
+            local_name!("div") => ContentWhitespace::space_around(),
+            local_name!("dl") => ContentWhitespace::space_around(),
+            local_name!("footer") => ContentWhitespace::space_around(),
+            local_name!("h1") => ContentWhitespace::space_around(),
+            local_name!("h2") => ContentWhitespace::space_around(),
+            local_name!("h3") => ContentWhitespace::space_around(),
+            local_name!("h4") => ContentWhitespace::space_around(),
+            local_name!("h5") => ContentWhitespace::space_around(),
+            local_name!("h6") => ContentWhitespace::space_around(),
+            local_name!("header") => ContentWhitespace::space_around(),
+            local_name!("hgroup") => ContentWhitespace::space_around(),
+            local_name!("hr") => ContentWhitespace::space_around(),
+            local_name!("li") => ContentWhitespace::space_around(),
+            local_name!("nav") => ContentWhitespace::space_around(),
+            local_name!("ol") => ContentWhitespace::space_around(),
+            local_name!("p") => ContentWhitespace::space_around(),
+            local_name!("pre") => ContentWhitespace::space_around(),
+            local_name!("section") => ContentWhitespace::space_around(),
+            local_name!("ul") => ContentWhitespace::space_around(),
+        }
     };
 }

@@ -3,7 +3,7 @@ use std::io::{Error, Read, Write};
 use url::{ParseError, Url};
 
 use html5ever::interface::tree_builder::QuirksMode;
-use html5ever::tendril::{StrTendril, TendrilSink};
+use html5ever::tendril::{format_tendril, StrTendril, TendrilSink};
 use html5ever::{parse_document, parse_fragment, serialize, Attribute, LocalName, QualName};
 
 use crate::arena_dom::{Arena, Node, NodeData, Ref, Sink};
@@ -31,12 +31,28 @@ pub struct SanitizerConfig {
     pub allowed_css_properties: HashSet<CssProperty>,
     pub allow_css_comments: bool,
     pub remove_contents_when_unwrapped: HashSet<LocalName>,
+    pub whitespace_around_unwrapped_content: HashMap<LocalName, ContentWhitespace<'static>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum Protocol<'a> {
     Scheme(&'a str),
     Relative,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContentWhitespace<'a> {
+    before: &'a str,
+    after: &'a str,
+}
+
+impl<'a> ContentWhitespace<'a> {
+    pub fn space_around() -> ContentWhitespace<'a> {
+        ContentWhitespace {
+            before: " ",
+            after: " ",
+        }
+    }
 }
 
 impl<'arena> Sanitizer<'arena> {
@@ -109,6 +125,7 @@ impl<'arena> Sanitizer<'arena> {
             if self.should_remove_contents_when_unwrapped(node) {
                 node.detach();
             } else if let Some(unwrapped_node) = node.unwrap() {
+                self.add_unwrapped_content_whitespace(node, unwrapped_node);
                 self.traverse(unwrapped_node);
             }
 
@@ -347,6 +364,31 @@ impl<'arena> Sanitizer<'arena> {
             }
         }
     }
+
+    fn add_unwrapped_content_whitespace(
+        &self,
+        wrapping_node: Ref<'arena>,
+        unwrapped_node: Ref<'arena>,
+    ) {
+        if let NodeData::Element { ref name, .. } = wrapping_node.data {
+            if let Some(content_whitespace) = self
+                .config
+                .whitespace_around_unwrapped_content
+                .get(&name.local)
+            {
+                if let NodeData::Text { ref contents, .. } = unwrapped_node.data {
+                    contents.replace_with(|current| {
+                        format_tendril!(
+                            "{}{}{}",
+                            content_whitespace.before,
+                            current,
+                            content_whitespace.after
+                        )
+                    });
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -390,6 +432,7 @@ mod test {
             allowed_css_properties: HashSet::new(),
             allow_css_comments: false,
             remove_contents_when_unwrapped: HashSet::new(),
+            whitespace_around_unwrapped_content: HashMap::new(),
         };
     }
 
@@ -777,6 +820,28 @@ mod test {
         assert_eq!(
             str::from_utf8(&output).unwrap(),
             "<!DOCTYPE html><html><div></div></html>"
+        );
+    }
+
+    #[test]
+    fn add_unwrapped_content_whitespace() {
+        let mut unwrapped_whitespace_config = EMPTY_CONFIG.clone();
+        unwrapped_whitespace_config
+            .allowed_elements
+            .extend(vec![local_name!("html"), local_name!("div")]);
+        unwrapped_whitespace_config
+            .whitespace_around_unwrapped_content
+            .insert(local_name!("span"), ContentWhitespace::space_around());
+        let sanitizer = Sanitizer::new(&unwrapped_whitespace_config, vec![]);
+        let mut mock_data =
+            MockRead::new("<div>div-1<span>content-1</span><span>content-2</span>div-2</div>");
+        let mut output = vec![];
+        sanitizer
+            .sanitize_fragment(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<html><div>div-1 content-1  content-2 div-2</div></html>"
         );
     }
 }

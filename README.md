@@ -37,5 +37,36 @@ most cases, it should be used over this library. However, chela provides
 sanitization of CSS in addition to HTML, which ammonia does not support. Also, 
 chela allows users to write custom functions to perform more complex 
 transformations that simple whitelist rules cannot support. In this way, chela 
-is more than a sanitization library, but a tool to rapidly perform 
+is more than a sanitization library, it's tool to rapidly perform 
 transformations on HTML and CSS inputs.
+
+## TODO
+
+There is still a lot left to be done with this project. Here's a high-level 
+overview of what I think is left.
+
+* Proper binary and library distinction: I need to add a proper command-line 
+  interface as well as solidify the public API I'd like to expose to users of 
+  the library.
+* Documentation: I won't consider this project usable until at least that is 
+  done. I plan on using the standard Rust cargo docs for this.
+* First release on crates.io
+* Examples: I would like a bunch of short examples in this README highlighting 
+  the features of chela in addition to an `examples` folder with more complex 
+  examples.
+    - One example in particular that I'd like to cover is using chela from a 
+      Rails project using [Helix](https://github.com/tildeio/helix). A major 
+      motivation for this project was to provide a speedy drop-in replacement 
+      for santize in Ruby projects.
+* More tests.
+    - Unit tests: I have some of these already, but more modules need it. I also 
+      would like to find a better method of organizing them.
+    - Test cases from ammonia and sanitize: I'd like a guarantee that chela is 
+      as safe to use as ammonia or sanitize. I can only get to that point once 
+      I've imported all of the input/output tests from those two projects.
+* CI: A way to automate tests. This would be a necessary step towards providing 
+  a streamlined process for community pull requests.
+* Benchmarks: I'd like to know how fast this library compares to similar 
+  projects like ammonia and sanitize. If it's faster, that would be a great 
+  thing to know, if it's slower I'd like to do some profiling to find areas to 
+  improve.

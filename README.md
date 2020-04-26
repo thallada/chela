@@ -1,8 +1,10 @@
 # chela: HTML & CSS Sanitizer and Transformer
 
-![chela](img/chela.svg)
+<p align="center">
+  <img width="200" height="200" src="img/chela.svg">
+</p>
 
-chela (/ˈkiːlə/ — KEE-LUH) is a program that prunes untrusted HTML and CSS using 
+chela (/ˈkiːlə/ - KEE-LUH) is a program that prunes untrusted HTML and CSS using 
 a whitelist of rules. It is also a library for general-purpose HTML and CSS 
 transforming that allows users to define custom functions that modify the parsed 
 HTML tree node-by-node as it is traversed.

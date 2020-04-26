@@ -27,11 +27,11 @@ mod css_parser;
 mod sanitizer;
 
 use arena_dom::{create_element, Arena, NodeData, Ref};
-use config::default::DEFAULT_CONFIG;
+use config::basic::BASIC_CONFIG;
 use sanitizer::Sanitizer;
 
 fn main() {
-    let sanitizer = Sanitizer::new(&DEFAULT_CONFIG, vec![&add_spacer_elements_around_ul]);
+    let sanitizer = Sanitizer::new(&BASIC_CONFIG, vec![&add_spacer_elements_around_ul]);
     sanitizer
         .sanitize_fragment(&mut io::stdin(), &mut io::stdout())
         .unwrap();

@@ -549,7 +549,7 @@ impl<'arena> Serialize for Node<'arena> {
                                 if let Some(serialized_declarations) = &at.serialized_value {
                                     (&at.name, serialized_declarations.as_str())
                                 } else {
-                                    panic!("Serialized style attribute value was not saved to the arena");
+                                    unreachable!("Serialized style attribute value was not saved to the arena");
                                 }
                             }
                             Attribute::Text(at) => (&at.name, &at.value[..]),

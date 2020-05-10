@@ -259,3 +259,44 @@ impl Into<String> for CssDeclaration {
         format!("{}:{};", self.property, self.value)
     }
 }
+
+pub fn serialize_css_rules(rules: &[CssRule]) -> String {
+    let mut serialized_rules = String::new();
+    for rule in rules {
+        match rule {
+            CssRule::StyleRule(style_rule) => {
+                serialized_rules += &style_rule.selectors;
+                serialized_rules += "{";
+                for declaration in style_rule.declarations.iter() {
+                    serialized_rules += &declaration.to_string();
+                }
+                serialized_rules += &serialize_css_declarations(&style_rule.declarations);
+                serialized_rules += " }";
+            }
+            CssRule::AtRule(at_rule) => {
+                serialized_rules += "@";
+                serialized_rules += &at_rule.name;
+                serialized_rules += &at_rule.prelude;
+                if let Some(block) = &at_rule.block {
+                    serialized_rules += "{";
+                    serialized_rules += &serialize_css_rules(&block);
+                    serialized_rules += " }";
+                } else {
+                    serialized_rules += "; ";
+                }
+            }
+        }
+    }
+    serialized_rules
+}
+
+pub fn serialize_css_declarations(declarations: &[CssDeclaration]) -> String {
+    let mut serialized_declarations = String::new();
+    for (index, declaration) in declarations.iter().enumerate() {
+        serialized_declarations += &declaration.to_string();
+        if index != declarations.len() - 1 {
+            serialized_declarations += " ";
+        }
+    }
+    serialized_declarations
+}

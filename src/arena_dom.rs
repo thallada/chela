@@ -24,7 +24,9 @@ use html5ever::interface::tree_builder::{ElementFlags, NodeOrText, QuirksMode, T
 use html5ever::serialize::TraversalScope::{ChildrenOnly, IncludeNode};
 use html5ever::serialize::{Serialize, Serializer, TraversalScope};
 use html5ever::tendril::StrTendril;
-use html5ever::{Attribute, ExpandedName, LocalName, QualName};
+use html5ever::{Attribute as HTML5everAttribute, ExpandedName, LocalName, QualName};
+
+use crate::css_parser::{CssDeclaration, CssRule};
 
 pub fn create_element<'arena>(arena: Arena<'arena>, name: &str) -> Ref<'arena> {
     arena.alloc(Node::new(NodeData::Element {
@@ -58,6 +60,23 @@ pub struct Node<'arena> {
 }
 
 #[derive(Debug)]
+pub struct StyleAttribute {
+    pub name: QualName,
+    pub value: Vec<CssDeclaration>,
+    // Need to store the serialized value to the arena because html5ever expects a &str for
+    // attribute values during serlialization. If this is None, `serialize` will construct a String
+    // from serializing the `CssDeclaration`s, store it here, and then reference it with
+    // `.as_str()`.
+    pub serialized_value: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum Attribute {
+    Style(StyleAttribute),
+    Text(HTML5everAttribute),
+}
+
+#[derive(Debug)]
 pub enum NodeData<'arena> {
     Document,
     Doctype {
@@ -67,6 +86,9 @@ pub enum NodeData<'arena> {
     },
     Text {
         contents: RefCell<StrTendril>,
+    },
+    StyleSheet {
+        rules: Vec<CssRule>,
     },
     Comment {
         contents: StrTendril,
@@ -232,6 +254,14 @@ impl<'arena> fmt::Display for NodeData<'arena> {
                 "Text: {}...",
                 &contents.borrow().chars().take(10).collect::<String>()
             ),
+            NodeData::StyleSheet { rules } => write!(
+                f,
+                "Stylesheet: {}...",
+                &serialize_css_rules(rules)
+                    .chars()
+                    .take(10)
+                    .collect::<String>()
+            ),
             NodeData::ProcessingInstruction { .. } => write!(f, "ProcessingInstruction: ..."),
             NodeData::Comment { contents } => write!(
                 f,
@@ -379,12 +409,17 @@ impl<'arena> TreeSink for Sink<'arena> {
     fn create_element(
         &mut self,
         name: QualName,
-        attrs: Vec<Attribute>,
+        attrs: Vec<HTML5everAttribute>,
         flags: ElementFlags,
     ) -> Ref<'arena> {
         self.new_node(NodeData::Element {
             name,
-            attrs: RefCell::new(attrs),
+            attrs: RefCell::new(
+                attrs
+                    .into_iter()
+                    .map(|attr| Attribute::Text(attr))
+                    .collect(),
+            ),
             template_contents: if flags.template {
                 Some(self.new_node(NodeData::Document))
             } else {
@@ -447,7 +482,7 @@ impl<'arena> TreeSink for Sink<'arena> {
         }))
     }
 
-    fn add_attrs_if_missing(&mut self, target: &Ref<'arena>, attrs: Vec<Attribute>) {
+    fn add_attrs_if_missing(&mut self, target: &Ref<'arena>, attrs: Vec<HTML5everAttribute>) {
         let mut existing = if let NodeData::Element { ref attrs, .. } = target.data {
             attrs.borrow_mut()
         } else {
@@ -456,13 +491,18 @@ impl<'arena> TreeSink for Sink<'arena> {
 
         let existing_names = existing
             .iter()
-            .map(|e| e.name.clone())
+            .map(|e| match e {
+                Attribute::Style(attr) => attr.name.clone(),
+                Attribute::Text(attr) => attr.name.clone(),
+            })
             .collect::<HashSet<_>>();
-        existing.extend(
-            attrs
-                .into_iter()
-                .filter(|attr| !existing_names.contains(&attr.name)),
-        );
+        existing.extend(attrs.into_iter().filter_map(|attr| {
+            if !existing_names.contains(&attr.name) {
+                Some(Attribute::Text(attr))
+            } else {
+                None
+            }
+        }));
     }
 
     fn remove_from_parent(&mut self, target: &Ref<'arena>) {
@@ -477,6 +517,47 @@ impl<'arena> TreeSink for Sink<'arena> {
             new_parent.append(child)
         }
     }
+}
+
+fn serialize_css_rules(rules: &[CssRule]) -> String {
+    let mut serialized_rules = String::new();
+    for rule in rules {
+        match rule {
+            CssRule::StyleRule(style_rule) => {
+                serialized_rules += &style_rule.selectors;
+                serialized_rules += "{";
+                for declaration in style_rule.declarations.iter() {
+                    serialized_rules += &declaration.to_string();
+                }
+                serialized_rules += &serialize_css_declarations(&style_rule.declarations);
+                serialized_rules += " }";
+            }
+            CssRule::AtRule(at_rule) => {
+                serialized_rules += "@";
+                serialized_rules += &at_rule.name;
+                serialized_rules += &at_rule.prelude;
+                if let Some(block) = &at_rule.block {
+                    serialized_rules += "{";
+                    serialized_rules += &serialize_css_rules(&block);
+                    serialized_rules += " }";
+                } else {
+                    serialized_rules += "; ";
+                }
+            }
+        }
+    }
+    serialized_rules
+}
+
+fn serialize_css_declarations(declarations: &[CssDeclaration]) -> String {
+    let mut serialized_declarations = String::new();
+    for (index, declaration) in declarations.iter().enumerate() {
+        serialized_declarations += &declaration.to_string();
+        if index != declarations.len() - 1 {
+            serialized_declarations += " ";
+        }
+    }
+    serialized_declarations
 }
 
 // Implementation adapted from implementation for RcDom:
@@ -498,7 +579,22 @@ impl<'arena> Serialize for Node<'arena> {
                 if traversal_scope == IncludeNode {
                     serializer.start_elem(
                         name.clone(),
-                        attrs.borrow().iter().map(|at| (&at.name, &at.value[..])),
+                        attrs.borrow_mut().iter_mut().map(|at| match at {
+                            Attribute::Style(at) => {
+                                if at.serialized_value.is_none() {
+                                    let serialized_declaration =
+                                        serialize_css_declarations(&at.value);
+                                    at.serialized_value = Some(serialized_declaration);
+                                }
+
+                                if let Some(serialized_declarations) = &at.serialized_value {
+                                    (&at.name, serialized_declarations.as_str())
+                                } else {
+                                    panic!("Serialized style attribute value was not saved to the arena");
+                                }
+                            }
+                            Attribute::Text(at) => (&at.name, &at.value[..]),
+                        }),
                     )?;
                 }
 
@@ -524,6 +620,9 @@ impl<'arena> Serialize for Node<'arena> {
             }
             (&IncludeNode, &NodeData::Text { ref contents }) => {
                 serializer.write_text(&contents.borrow())?
+            }
+            (&IncludeNode, &NodeData::StyleSheet { ref rules }) => {
+                serializer.write_text(&serialize_css_rules(rules))?
             }
             (&IncludeNode, &NodeData::Comment { ref contents }) => {
                 serializer.write_comment(&contents)?

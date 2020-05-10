@@ -4,11 +4,13 @@ use url::{ParseError, Url};
 
 use html5ever::interface::tree_builder::QuirksMode;
 use html5ever::tendril::{format_tendril, StrTendril, TendrilSink};
-use html5ever::{parse_document, parse_fragment, serialize, Attribute, LocalName, QualName};
+use html5ever::{
+    parse_document, parse_fragment, serialize, Attribute as HTML5everAttribute, LocalName, QualName,
+};
 
-use crate::arena_dom::{Arena, Node, NodeData, Ref, Sink};
+use crate::arena_dom::{Arena, Attribute, Node, NodeData, Ref, Sink, StyleAttribute};
 use crate::css_at_rule::CssAtRule;
-use crate::css_parser::{parse_css_style_attribute, parse_css_stylesheet, CssRule};
+use crate::css_parser::{parse_css_style_attribute, parse_css_stylesheet, CssRule, CssStyleRule};
 use crate::css_property::CssProperty;
 
 pub struct Sanitizer<'arena> {
@@ -139,9 +141,6 @@ impl<'arena> Sanitizer<'arena> {
         self.remove_attributes(node);
         self.add_attributes(node);
         self.sanitize_attribute_protocols(node);
-        // TODO: save the parsed CSS syntax tree from these methods onto the arena dom so that
-        // user-created transformers below will have access to modify them without having to
-        // re-parse.
         self.sanitize_style_tag_css(node);
         self.sanitize_style_attribute_css(node);
 
@@ -160,9 +159,10 @@ impl<'arena> Sanitizer<'arena> {
 
     fn should_unwrap_node(&self, node: Ref) -> bool {
         match node.data {
-            NodeData::Document | NodeData::Text { .. } | NodeData::ProcessingInstruction { .. } => {
-                false
-            }
+            NodeData::Document
+            | NodeData::Text { .. }
+            | NodeData::StyleSheet { .. }
+            | NodeData::ProcessingInstruction { .. } => false,
             NodeData::Comment { .. } => !self.config.allow_comments,
             NodeData::Doctype { .. } => !self.config.allow_doctype,
             NodeData::Element { ref name, .. } => {
@@ -176,6 +176,7 @@ impl<'arena> Sanitizer<'arena> {
             NodeData::Document
             | NodeData::Doctype { .. }
             | NodeData::Text { .. }
+            | NodeData::StyleSheet { .. }
             | NodeData::ProcessingInstruction { .. }
             | NodeData::Comment { .. } => false,
             NodeData::Element { ref name, .. } => self
@@ -197,15 +198,17 @@ impl<'arena> Sanitizer<'arena> {
             let all_allowed = &self.config.allowed_attributes;
             let per_element_allowed = self.config.allowed_attributes_per_element.get(&name.local);
             while i != attrs.len() {
-                if !all_allowed.contains(&attrs[i].name.local) {
-                    if let Some(per_element_allowed) = per_element_allowed {
-                        if per_element_allowed.contains(&attrs[i].name.local) {
-                            i += 1;
-                            continue;
+                if let Attribute::Text(attr) = &attrs[i] {
+                    if !all_allowed.contains(&attr.name.local) {
+                        if let Some(per_element_allowed) = per_element_allowed {
+                            if per_element_allowed.contains(&attr.name.local) {
+                                i += 1;
+                                continue;
+                            }
                         }
+                        attrs.remove(i);
+                        continue;
                     }
-                    attrs.remove(i);
-                    continue;
                 }
                 i += 1;
             }
@@ -225,18 +228,18 @@ impl<'arena> Sanitizer<'arena> {
                 self.config.add_attributes_per_element.get(&name.local);
 
             for (name, &value) in add_attributes.iter() {
-                attrs.push(Attribute {
+                attrs.push(Attribute::Text(HTML5everAttribute {
                     name: QualName::new(None, ns!(), name.clone()),
                     value: StrTendril::from(value),
-                });
+                }));
             }
 
             if let Some(add_attributes_per_element) = add_attributes_per_element {
                 for (name, &value) in add_attributes_per_element.iter() {
-                    attrs.push(Attribute {
+                    attrs.push(Attribute::Text(HTML5everAttribute {
                         name: QualName::new(None, ns!(), name.clone()),
                         value: StrTendril::from(value),
-                    });
+                    }));
                 }
             }
         }
@@ -254,25 +257,30 @@ impl<'arena> Sanitizer<'arena> {
             if let Some(protocols) = self.config.allowed_protocols.get(&name.local) {
                 let mut i = 0;
                 while i != attrs.len() {
-                    if let Some(allowed_protocols) = protocols.get(&attrs[i].name.local) {
-                        match Url::parse(&attrs[i].value) {
-                            Ok(url) => {
-                                if !allowed_protocols.contains(&Protocol::Scheme(url.scheme())) {
+                    if let Attribute::Text(attr) = &attrs[i] {
+                        if let Some(allowed_protocols) = protocols.get(&attr.name.local) {
+                            match Url::parse(&attr.value) {
+                                Ok(url) => {
+                                    if !allowed_protocols.contains(&Protocol::Scheme(url.scheme()))
+                                    {
+                                        attrs.remove(i);
+                                    } else {
+                                        i += 1;
+                                    }
+                                }
+                                Err(ParseError::RelativeUrlWithoutBase) => {
+                                    if !allowed_protocols.contains(&Protocol::Relative) {
+                                        attrs.remove(i);
+                                    } else {
+                                        i += 1;
+                                    }
+                                }
+                                Err(_) => {
                                     attrs.remove(i);
-                                } else {
-                                    i += 1;
                                 }
                             }
-                            Err(ParseError::RelativeUrlWithoutBase) => {
-                                if !allowed_protocols.contains(&Protocol::Relative) {
-                                    attrs.remove(i);
-                                } else {
-                                    i += 1;
-                                }
-                            }
-                            Err(_) => {
-                                attrs.remove(i);
-                            }
+                        } else {
+                            i += 1;
                         }
                     } else {
                         i += 1;
@@ -282,58 +290,50 @@ impl<'arena> Sanitizer<'arena> {
         }
     }
 
-    fn serialize_sanitized_css_rules(&self, rules: Vec<CssRule>) -> String {
-        let mut sanitized_css = String::new();
-        for rule in rules {
-            match rule {
-                CssRule::StyleRule(style_rule) => {
-                    sanitized_css += &style_rule.selectors;
-                    sanitized_css += "{";
-                    for declaration in style_rule.declarations.into_iter() {
-                        let declaration_string = &declaration.to_string();
-                        if self
-                            .config
-                            .allowed_css_properties
-                            .contains(&CssProperty::from(declaration.property))
-                        {
-                            sanitized_css += declaration_string;
-                        }
-                    }
-                    sanitized_css += " }";
-                }
+    fn sanitize_css_rules(&self, rules: Vec<CssRule>) -> Vec<CssRule> {
+        rules
+            .into_iter()
+            .filter_map(|rule| match rule {
+                CssRule::StyleRule(style_rule) => Some(CssRule::StyleRule(CssStyleRule {
+                    selectors: style_rule.selectors,
+                    declarations: style_rule
+                        .declarations
+                        .into_iter()
+                        .filter(|declaration| {
+                            self.config
+                                .allowed_css_properties
+                                .contains(&CssProperty::from(declaration.property.as_str()))
+                        })
+                        .collect(),
+                })),
                 CssRule::AtRule(at_rule) => {
                     if self
                         .config
                         .allowed_css_at_rules
-                        .contains(&CssAtRule::from(at_rule.name.clone()))
+                        .contains(&CssAtRule::from(at_rule.name.as_str()))
                     {
-                        sanitized_css += &format!("@{}", &at_rule.name);
-                        sanitized_css += &at_rule.prelude;
-                        if let Some(block) = at_rule.block {
-                            sanitized_css += "{";
-                            sanitized_css += &self.serialize_sanitized_css_rules(block);
-                            sanitized_css += " }";
-                        } else {
-                            sanitized_css += "; ";
-                        }
+                        Some(CssRule::AtRule(at_rule))
+                    } else {
+                        None
                     }
                 }
-            }
-        }
-        sanitized_css
+            })
+            .collect()
     }
 
-    fn sanitize_style_tag_css(&self, node: Ref<'arena>) {
-        if let NodeData::Text { ref contents } = node.data {
-            // TODO: seems rather expensive to lookup the parent on every Text node. Better
-            // solution would be to pass some sort of context from the parent that marks that this
-            // Text node is inside a <style>.
-            if let Some(parent) = node.parent.get() {
-                if let NodeData::Element { ref name, .. } = parent.data {
-                    if name.local == local_name!("style") {
+    fn sanitize_style_tag_css(&'arena self, node: Ref<'arena>) {
+        if let NodeData::Element { ref name, .. } = node.data {
+            if name.local == local_name!("style") {
+                // TODO: is it okay to assume <style> tags will only ever have one text node child?
+                if let Some(first_child) = node.first_child.take() {
+                    if let NodeData::Text { ref contents, .. } = first_child.data {
                         let rules = parse_css_stylesheet(&contents.borrow());
-                        let sanitized_css = self.serialize_sanitized_css_rules(rules);
-                        contents.replace(StrTendril::from(sanitized_css));
+                        let sanitized_rules = self.sanitize_css_rules(rules);
+                        first_child.detach();
+                        let stylesheet = self.arena.alloc(Node::new(NodeData::StyleSheet {
+                            rules: sanitized_rules,
+                        }));
+                        node.append(stylesheet);
                     }
                 }
             }
@@ -342,25 +342,32 @@ impl<'arena> Sanitizer<'arena> {
 
     fn sanitize_style_attribute_css(&self, node: Ref<'arena>) {
         if let NodeData::Element { ref attrs, .. } = node.data {
-            for attr in attrs.borrow_mut().iter_mut() {
-                if attr.name.local == local_name!("style") {
-                    let css_str = &attr.value;
-                    let declarations = parse_css_style_attribute(css_str);
-                    let mut sanitized_css = String::new();
-                    for declaration in declarations.into_iter() {
-                        let declaration_string = &declaration.to_string();
-                        if self
-                            .config
-                            .allowed_css_properties
-                            .contains(&CssProperty::from(declaration.property))
-                        {
-                            sanitized_css += declaration_string;
-                            sanitized_css += " ";
-                        }
+            let mut i = 0;
+            let attrs = &mut attrs.borrow_mut();
+
+            while i != attrs.len() {
+                if let Attribute::Text(attr) = &attrs[i] {
+                    if attr.name.local == local_name!("style") {
+                        let css_str = &attr.value;
+                        let mut declarations = parse_css_style_attribute(css_str);
+                        declarations.retain(|declaration| {
+                            self.config
+                                .allowed_css_properties
+                                .contains(&CssProperty::from(declaration.property.as_str()))
+                        });
+                        let name = attr.name.clone();
+                        attrs.remove(i);
+                        attrs.insert(
+                            i,
+                            Attribute::Style(StyleAttribute {
+                                name,
+                                value: declarations,
+                                serialized_value: None,
+                            }),
+                        );
                     }
-                    let sanitized_css = sanitized_css.trim();
-                    attr.value = StrTendril::from(sanitized_css);
                 }
+                i += 1;
             }
         }
     }

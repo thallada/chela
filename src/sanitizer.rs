@@ -31,6 +31,7 @@ pub struct SanitizerConfig {
     pub allowed_protocols: HashMap<LocalName, HashMap<LocalName, HashSet<Protocol<'static>>>>,
     pub allowed_css_at_rules: HashSet<CssAtRule>,
     pub allowed_css_properties: HashSet<CssProperty>,
+    pub allowed_css_protocols: HashSet<Protocol<'static>>,
     pub allow_css_comments: bool,
     pub remove_contents_when_unwrapped: HashSet<LocalName>,
     pub whitespace_around_unwrapped_content: HashMap<LocalName, ContentWhitespace<'static>>,
@@ -437,6 +438,7 @@ mod test {
             allowed_protocols: HashMap::new(),
             allowed_css_at_rules: HashSet::new(),
             allowed_css_properties: HashSet::new(),
+            allowed_css_protocols: HashSet::new(),
             allow_css_comments: false,
             remove_contents_when_unwrapped: HashSet::new(),
             whitespace_around_unwrapped_content: HashMap::new(),
@@ -792,6 +794,56 @@ mod test {
         assert_eq!(
             str::from_utf8(&output).unwrap(),
             "<html><div style=\"margin: 10px; color: red;\"></div></html>"
+        );
+    }
+
+    #[test]
+    fn sanitize_stylesheet_css() {
+        let mut sanitize_css_config = EMPTY_CONFIG.clone();
+        sanitize_css_config
+            .allowed_elements
+            .extend(vec![local_name!("html"), local_name!("style")]);
+        sanitize_css_config
+            .allowed_css_properties
+            .extend(vec![css_property!("margin"), css_property!("color")]);
+        let sanitizer = Sanitizer::new(&sanitize_css_config, vec![]);
+        let mut mock_data =
+            MockRead::new("<style>div { margin: 10px; padding: 10px; color: red; }</style>");
+        let mut output = vec![];
+        sanitizer
+            .sanitize_fragment(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<html><style>div { margin: 10px; color: red; }</style></html>"
+        );
+    }
+
+    #[test]
+    fn sanitize_css_protocols() {
+        let mut sanitize_css_config = EMPTY_CONFIG.clone();
+        sanitize_css_config
+            .allowed_elements
+            .extend(vec![local_name!("html"), local_name!("style")]);
+        sanitize_css_config.allowed_css_properties.extend(vec![
+            css_property!("background-image"),
+            css_property!("content"),
+        ]);
+        sanitize_css_config
+            .allowed_css_protocols
+            .extend(vec![Protocol::Scheme("https")]);
+        let sanitizer = Sanitizer::new(&sanitize_css_config, vec![]);
+        let mut mock_data = MockRead::new(
+            "<style>div { background-image: url(https://example.com); \
+             content: url(icon.jpg); }</style>",
+        );
+        let mut output = vec![];
+        sanitizer
+            .sanitize_fragment(&mut mock_data, &mut output)
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            "<html><style>div { background-image: url(https://example.com) }</style></html>"
         );
     }
 

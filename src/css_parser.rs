@@ -266,10 +266,7 @@ pub fn serialize_css_rules(rules: &[CssRule]) -> String {
         match rule {
             CssRule::StyleRule(style_rule) => {
                 serialized_rules += &style_rule.selectors;
-                serialized_rules += "{";
-                for declaration in style_rule.declarations.iter() {
-                    serialized_rules += &declaration.to_string();
-                }
+                serialized_rules += "{ ";
                 serialized_rules += &serialize_css_declarations(&style_rule.declarations);
                 serialized_rules += " }";
             }
@@ -278,7 +275,7 @@ pub fn serialize_css_rules(rules: &[CssRule]) -> String {
                 serialized_rules += &at_rule.name;
                 serialized_rules += &at_rule.prelude;
                 if let Some(block) = &at_rule.block {
-                    serialized_rules += "{";
+                    serialized_rules += "{ ";
                     serialized_rules += &serialize_css_rules(&block);
                     serialized_rules += " }";
                 } else {

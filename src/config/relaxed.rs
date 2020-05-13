@@ -843,6 +843,11 @@ lazy_static! {
             css_property!("writing-mode"),
             css_property!("z-index"),
         });
+        config.allowed_css_protocols.extend(hashset! {
+            Protocol::Scheme("http"),
+            Protocol::Scheme("https"),
+            Protocol::Relative,
+        });
         config
     };
 }
